@@ -21,11 +21,13 @@ export type RuntimePortForwardsPreloadApi = {
   add: (args: RuntimePortForwardSpec) => Promise<PortForwardEntry>
   update: (args: RuntimePortForwardSpec & { id: string }) => Promise<PortForwardEntry>
   remove: (args: { id: string }) => Promise<boolean>
-  /** The server localhost port's forward, started on the same port number here when free. */
+  /** The server localhost port's forward, started on the same port number here when free.
+   *  `persist: false` lists a new forward only while it runs; it is never restored. */
   ensure: (args: {
     environmentId: string
     remotePort: number
     label?: string
+    persist?: boolean
   }) => Promise<{ entry: PortForwardEntry; created: boolean }>
   /** Restored forwards that moved off a busy port here; each is returned to one caller, once. */
   takeRestoredMoves: () => Promise<RestoredPortForwardMove[]>

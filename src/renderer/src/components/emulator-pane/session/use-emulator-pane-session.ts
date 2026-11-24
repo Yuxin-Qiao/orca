@@ -1,11 +1,10 @@
 import { useEmulatorDeviceInventory } from '../devices/use-emulator-device-inventory'
-import {
-  getEmulatorOpeningMode,
-  type EmulatorSelectionRequired
-} from '../../../../../shared/emulator/emulator-opening-preferences'
+import type { EmulatorSelectionRequired } from '../../../../../shared/emulator/emulator-opening-preferences'
+import { useConfiguredDefaultEmulatorUdid } from './use-configured-default-emulator-udid'
 import { supportsEmulatorOpeningPreferences } from '@/lib/simulator/launch/emulator-opening-preferences-capability'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
+import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
+import { attachEmulatorOnRuntime } from '@/lib/simulator/runtime/emulator-runtime-attach'
 import { useAppStore } from '@/store/index'
 import {
   deviceLabel,
@@ -40,11 +39,7 @@ export function useEmulatorPaneSession({
   autoAttachOnMount
 }: UseEmulatorPaneSessionArgs) {
   const t = useTranslate()
-  const configuredDefaultUdid = useAppStore((state) =>
-    state.settings && getEmulatorOpeningMode(state.settings) === 'specific'
-      ? (state.settings.mobileEmulatorDefaultDeviceUdid ?? null)
-      : null
-  )
+  const configuredDefaultUdid = useConfiguredDefaultEmulatorUdid(worktreeId)
   // Consume the handoff only at mount; useRef(expr) would consume and discard later prelaunches on rerender.
   const [prelaunchedSession] = useState<EmulatorPaneSession['info'] | null>(() =>
     consumePrelaunchedSimulatorSession(worktreeId)
@@ -65,7 +60,7 @@ export function useEmulatorPaneSession({
   const mountedRef = useRef(true)
   const liveTargetRef = useRef<string | null>(prelaunchedState.liveTarget)
   const { devices, setDevices, refreshDevices, deviceRefreshErrorRef, markDeviceBooted } =
-    useEmulatorDeviceInventory(mountedRef, setError)
+    useEmulatorDeviceInventory(worktreeId, mountedRef, setError)
   const suppressAutoAttachRef = useRef(false)
   const refreshStreamKey = useCallback(() => setStreamKey(String(Date.now())), [])
   const {
@@ -161,7 +156,8 @@ export function useEmulatorPaneSession({
         if (list.length === 0 && deviceRefreshErrorRef.current) {
           throw deviceRefreshErrorRef.current
         }
-        const supportsPreferences = await supportsEmulatorOpeningPreferences()
+        const runtimeTarget = emulatorRuntimeTarget(worktreeId)
+        const supportsPreferences = await supportsEmulatorOpeningPreferences(runtimeTarget)
         if (request !== attachRequestRef.current) {
           return
         }
@@ -182,16 +178,20 @@ export function useEmulatorPaneSession({
           resetVisualOrientation()
         }
         const res = await attachWithAvdFallback(list, target, setSelectedUdid, (device) =>
-          callRuntimeRpc<{
+          attachEmulatorOnRuntime<{
             attached?: boolean
             info?: EmulatorPaneSession['info']
             selectionRequired?: EmulatorSelectionRequired
-          }>({ kind: 'local' }, 'emulator.attach', {
-            ...(device ? { device } : {}),
-            ...(supportsPreferences ? { userInitiated: true } : {}),
-            worktree: worktreeId,
-            focus: false
-          })
+          }>(
+            worktreeId,
+            {
+              ...(device ? { device } : {}),
+              ...(supportsPreferences ? { userInitiated: true } : {}),
+              focus: false
+            },
+            runtimeTarget,
+            list
+          )
         )
         if (request !== attachRequestRef.current) {
           return

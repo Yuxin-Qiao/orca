@@ -1,3 +1,4 @@
+import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import { useAppStore } from '@/store/index'
 import { shouldShutdownSimulatorForPaneUnmountFromTabs } from './simulator-tab-shutdown'
@@ -24,8 +25,8 @@ function getUnifiedTabsForWorktree(worktreeId: string): SimulatorTabReference[] 
   return useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []
 }
 
-function shutdownManagedSimulator(worktreeId: string): Promise<unknown> {
-  return callRuntimeRpc({ kind: 'local' }, 'emulator.shutdown', {
+async function shutdownManagedSimulator(worktreeId: string): Promise<unknown> {
+  return callRuntimeRpc(emulatorRuntimeTarget(worktreeId), 'emulator.shutdown', {
     worktree: worktreeId,
     managedOnly: true
   })

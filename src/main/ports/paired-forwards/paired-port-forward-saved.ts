@@ -20,6 +20,18 @@ export type PairedPortForwardStore = {
 
 let store: PairedPortForwardStore | null = null
 let pendingMoves: RestoredPortForwardMove[] = []
+// Forwards a running session made for itself (the Mobile Emulator's stream): listed while live, never
+// saved. Ids are never reused, so one left here after its forward closes matches nothing.
+const unsavedForwardIds = new Set<string>()
+
+export function markPairedPortForwardUnsaved(id: string): void {
+  unsavedForwardIds.add(id)
+}
+
+/** A saved ensure or a person's edit makes a session's forward theirs; true when it was unsaved. */
+export function adoptUnsavedPairedPortForward(id: string): boolean {
+  return unsavedForwardIds.delete(id)
+}
 
 export function setPairedPortForwardStore(next: PairedPortForwardStore | null): void {
   store = next
@@ -68,7 +80,8 @@ export function savePairedPortForwards(
     return
   }
   const kept = existing?.hostKeyFingerprint === key ? existing.forwards : []
-  const forwards = nextSavedPortForwards(active, kept, dropped)
+  const saved = active.filter((forward) => !unsavedForwardIds.has(forward.id))
+  const forwards = nextSavedPortForwards(saved, kept, dropped)
   store.set(environmentId, forwards.length > 0 ? { hostKeyFingerprint: key, forwards } : null)
 }
 

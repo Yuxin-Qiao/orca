@@ -93,7 +93,14 @@ export function registerRuntimeEnvironmentPortForwardHandlers(options: {
   )
   ipcMain.handle('runtimeEnvironments:ensurePortForward', (_event, input: unknown) =>
     ensurePairedPortForward(
-      z.object({ environmentId: EnvironmentId, remotePort: Port, label: Label }).parse(input)
+      z
+        .object({
+          environmentId: EnvironmentId,
+          remotePort: Port,
+          label: Label,
+          persist: z.boolean().optional()
+        })
+        .parse(input)
     )
   )
   ipcMain.handle('runtimeEnvironments:takeRestoredPortForwardMoves', () =>
