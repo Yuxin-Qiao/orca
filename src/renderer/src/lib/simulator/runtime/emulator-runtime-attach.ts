@@ -14,6 +14,7 @@ import type {
 import { scrcpyDeviceIdFromStreamUrl } from '@/components/emulator-pane/streaming/emulator-scrcpy-stream-url'
 import { formatSimulatorTabLabel } from '../tabs/simulator-tab-label'
 import { emulatorRuntimeTarget } from './emulator-runtime-target'
+import { EMULATOR_ATTACH_RPC_TIMEOUT_MS } from '../../../../../shared/emulator/emulator-attach-timeouts'
 import { hasRuntimeRpcErrorCode } from '../../../../../shared/remote-runtime/rpc/runtime-rpc-error-code'
 import { createNonSecureContextUuid } from '../../../../../shared/identifiers/non-secure-context-uuid'
 
@@ -64,7 +65,7 @@ type AcceptedStream = {
 /** One server workspace's attaches: the latest one started, the stream this desktop accepted, and
  *  whether this desktop started the server session that is running (so closing the pane stops it).
  *  Every cleanup goes through it, so an attach that lost the race never closes a newer stream. */
-type WorkspaceStream = { generation: number; accepted?: AcceptedStream; startedHere?: boolean }
+type WorkspaceStream = { generation: number; accepted?: AcceptedStream; startedHere?: string }
 
 const workspaceStreams = new Map<string, WorkspaceStream>()
 let watchingForwards = false
@@ -168,16 +169,23 @@ export function acceptedEmulatorStreamSession(worktreeId: string): string | unde
   return workspaceStreams.get(worktreeId)?.accepted?.session
 }
 
-/** This desktop started (or took over) the server session that runs now, so it may stop it. */
-export function emulatorSessionStartedHere(worktreeId: string): boolean {
-  return workspaceStreams.get(worktreeId)?.startedHere === true
+/** The device of the server session this desktop started (or took over), which it may stop, and the
+ *  attach generation that recorded it. */
+export function emulatorSessionStartedHere(
+  worktreeId: string
+): { device: string; generation: number } | undefined {
+  const stream = workspaceStreams.get(worktreeId)
+  return stream?.startedHere !== undefined
+    ? { device: stream.startedHere, generation: stream.generation }
+    : undefined
 }
 
-/** The server session is stopped; a later close has nothing of this desktop's to stop. */
-export function noteEmulatorSessionStopped(worktreeId: string): void {
+/** The server session is stopped; unless a newer attach started another meanwhile, a later close has
+ *  nothing of this desktop's to stop. */
+export function noteEmulatorSessionStopped(worktreeId: string, generation: number): void {
   const stream = workspaceStreams.get(worktreeId)
-  if (stream) {
-    stream.startedHere = false
+  if (stream?.generation === generation) {
+    stream.startedHere = undefined
   }
 }
 
@@ -227,11 +235,13 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
       releaseEmulatorStream(worktreeId)
     }
   }
-  const result = await callRuntimeRpc<TResult>(target, 'emulator.attach', {
-    ...params,
-    backend: 'ios',
-    worktree: worktreeId
-  }).catch((error: unknown) => {
+  const result = await callRuntimeRpc<TResult>(
+    target,
+    'emulator.attach',
+    { ...params, backend: 'ios', worktree: worktreeId },
+    // A cold simulator boot on the server takes far longer than an ordinary call.
+    { timeoutMs: EMULATOR_ATTACH_RPC_TIMEOUT_MS }
+  ).catch((error: unknown) => {
     // Switching devices stops the old one on the server first, so its stream is gone either way.
     if (typeof params.device === 'string') {
       replaced(params.device)
@@ -248,7 +258,7 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
   }
   if (!scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
     // The server now runs this desktop's session, whether or not its stream reaches here.
-    stream.startedHere = true
+    stream.startedHere = result.info.deviceUdid ?? result.info.device ?? ''
   }
   if (scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
     // A server older than the backend filter handed back Android. It may be an agent's session, so

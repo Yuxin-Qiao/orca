@@ -1,6 +1,7 @@
 import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
 import {
   acceptedEmulatorStreamSession,
+  emulatorSessionStartedHere,
   noteEmulatorSessionStopped,
   releaseEmulatorStream
 } from '@/lib/simulator/runtime/emulator-runtime-attach'
@@ -42,11 +43,14 @@ export function useEmulatorPaneShutdown({
       try {
         const target = emulatorRuntimeTarget(worktreeId)
         const session = acceptedEmulatorStreamSession(worktreeId)
+        const started = emulatorSessionStartedHere(worktreeId)
         const res = (await callRuntimeRpc(target, 'emulator.shutdown', {
           ...(deviceTarget ? { device: deviceTarget } : {}),
           worktree: worktreeId
         })) as { deviceUdid?: string }
-        noteEmulatorSessionStopped(worktreeId)
+        if (started) {
+          noteEmulatorSessionStopped(worktreeId, started.generation)
+        }
         if (session) {
           releaseEmulatorStream(worktreeId, session)
         }

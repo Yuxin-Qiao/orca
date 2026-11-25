@@ -34,13 +34,20 @@ function getUnifiedTabsForWorktree(worktreeId: string): SimulatorTabReference[] 
 async function shutdownManagedSimulator(worktreeId: string): Promise<void> {
   const target = emulatorRuntimeTarget(worktreeId)
   const session = acceptedEmulatorStreamSession(worktreeId)
-  // On a server only a session this desktop started is its to stop; an agent's may run there too.
-  if (target.kind === 'environment' && !emulatorSessionStartedHere(worktreeId)) {
-    return
-  }
+  const started = emulatorSessionStartedHere(worktreeId)
   try {
-    await callRuntimeRpc(target, 'emulator.shutdown', { worktree: worktreeId, managedOnly: true })
-    noteEmulatorSessionStopped(worktreeId)
+    // On a server only the session this desktop started is its to stop; an agent's may run there too.
+    if (target.kind === 'environment' && !started) {
+      return
+    }
+    await callRuntimeRpc(target, 'emulator.shutdown', {
+      worktree: worktreeId,
+      managedOnly: true,
+      ...(started?.device ? { activeDevice: started.device } : {})
+    })
+    if (started) {
+      noteEmulatorSessionStopped(worktreeId, started.generation)
+    }
   } finally {
     if (session) {
       releaseEmulatorStream(worktreeId, session)

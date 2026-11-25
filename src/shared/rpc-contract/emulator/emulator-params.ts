@@ -143,7 +143,10 @@ export const KillParams = z.object({
 })
 
 export const ShutdownParams = KillParams.extend({
-  managedOnly: z.boolean().optional()
+  managedOnly: z.boolean().optional(),
+  /** With managedOnly: stop the workspace's session only while it is still on this device, so a caller
+   *  never stops a session someone else switched it to. Older servers drop it. */
+  activeDevice: z.string().optional()
 })
 
 export const ListParams = WorktreeParam
