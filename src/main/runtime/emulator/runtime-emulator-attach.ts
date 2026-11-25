@@ -45,6 +45,8 @@ export class RuntimeEmulatorAttach {
     if (settings.mobileEmulatorEnabled === false) {
       throw new EmulatorError('emulator_disabled', emulatorFailureText('disabled'))
     }
+    const ofBackend = (item: { backend?: EmulatorBackendKind }) =>
+      !params.backend || item.backend === params.backend
     const choiceGeneration =
       params.userInitiated && params.device ? ++this.choiceGeneration : undefined
     const bridge = this.requireBridge()
@@ -87,15 +89,13 @@ export class RuntimeEmulatorAttach {
       if (!device && worktreeId) {
         const active = await bridge.getReusableActiveForWorktree(worktreeId)
         assertCurrent()
-        if (active && (!params.backend || active.backend === params.backend)) {
+        if (active && ofBackend(active)) {
           this.notify(worktreeId, active, params.focus)
           return { attached: true, info: active }
         }
       }
       if (params.userInitiated) {
-        const devices = (await bridge.listAllDevices()).filter(
-          (item) => !params.backend || item.backend === params.backend
-        )
+        const devices = (await bridge.listAllDevices()).filter(ofBackend)
         assertCurrent()
         if (!device) {
           const selection = resolveEmulatorOpeningPreference(
@@ -119,13 +119,18 @@ export class RuntimeEmulatorAttach {
           return { attached: false, selectionRequired: selectedDevice ? 'unavailable' : 'missing' }
         }
       } else {
-        device ??= await resolveDefaultAttachDevice(bridge, {
-          current: worktreeId ? bridge.getActiveForWorktree(worktreeId)?.deviceUdid : undefined,
-          configured:
-            getEmulatorOpeningMode(settings) === 'specific'
-              ? (settings.mobileEmulatorDefaultDeviceUdid ?? undefined)
-              : undefined
-        })
+        const listAllDevices = async () => (await bridge.listAllDevices()).filter(ofBackend)
+        device ??= await resolveDefaultAttachDevice(
+          { listAllDevices },
+          {
+            current: worktreeId ? bridge.getActiveForWorktree(worktreeId)?.deviceUdid : undefined,
+            // The configured device skips the device list, so a backend-limited attach ignores it.
+            configured:
+              !params.backend && getEmulatorOpeningMode(settings) === 'specific'
+                ? (settings.mobileEmulatorDefaultDeviceUdid ?? undefined)
+                : undefined
+          }
+        )
       }
       if (!device) {
         throw new EmulatorError(

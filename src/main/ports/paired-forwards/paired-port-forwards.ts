@@ -10,11 +10,7 @@ import {
   registerForwardPortHolder
 } from '../../ssh/port-forwarding/forward-local-port-choice'
 import { forwardKey, type ForwardMapping } from '../../ssh/port-forwarding/saved-port-forward-list'
-import {
-  dropPairedPortForwardHolds,
-  hasPairedPortForwardHolders,
-  holdPairedPortForward
-} from './paired-port-forward-holds'
+import { dropPairedPortForwardHolds, holdPairedPortForward } from './paired-port-forward-holds'
 import {
   forgetSavedPairedPortForwards,
   recordRestoredPortForwardMove,
@@ -139,14 +135,14 @@ export function updatePairedPortForward(
   })
 }
 
-/** `onlyUnheld`: a session's forward closes only if no session joined it again while this waited. */
-export async function removePairedPortForward(id: string, onlyUnheld = false): Promise<boolean> {
+/** `when` decides in the server's queue, after every change queued before this removal. */
+export async function removePairedPortForward(id: string, when?: () => boolean): Promise<boolean> {
   const environmentId = manager.listForwards().find((entry) => entry.id === id)?.connectionId
   if (!environmentId) {
     return false
   }
   return serializePortForwardChange(forwardChangeKey(environmentId), async () => {
-    if (onlyUnheld && hasPairedPortForwardHolders(id)) {
+    if (when && !when()) {
       return false
     }
     const hostKey = pairedForwardTunnel(environmentId)?.hostKeyFingerprint

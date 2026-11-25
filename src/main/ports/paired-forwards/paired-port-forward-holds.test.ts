@@ -83,8 +83,11 @@ describe('held paired port forwards', () => {
     const remotePort = await freePort()
 
     const held = await ensurePairedPortForward({ environmentId: 'env-1', remotePort, heldBy: 'a' })
-    await ensurePairedPortForward({ environmentId: 'env-1', remotePort })
-    await releasePairedPortForwards({ heldBy: 'a' })
+    // The person's ensure queues first; the session lets go while it is still resolving the server.
+    await Promise.all([
+      ensurePairedPortForward({ environmentId: 'env-1', remotePort }),
+      releasePairedPortForwards({ heldBy: 'a' })
+    ])
 
     expect(listPairedPortForwards('env-1')).toEqual([held.entry])
     expect(saved.get('env-1')).toMatchObject({

@@ -12,6 +12,7 @@ import { useAppStore } from '@/store/index'
 import {
   deviceLabel,
   simulatorPreviewStreamUrl,
+  type EmulatorPaneAttachResult,
   type EmulatorPaneSession,
   type UseEmulatorPaneSessionArgs
 } from './emulator-pane-types'
@@ -182,11 +183,7 @@ export function useEmulatorPaneSession({
           resetVisualOrientation()
         }
         const res = await attachWithAvdFallback(list, target, setSelectedUdid, (device) =>
-          attachEmulatorOnRuntime<{
-            attached?: boolean
-            info?: EmulatorPaneSession['info']
-            selectionRequired?: EmulatorSelectionRequired
-          }>(
+          attachEmulatorOnRuntime<EmulatorPaneAttachResult>(
             worktreeId,
             {
               ...(device ? { device } : {}),
@@ -230,8 +227,11 @@ export function useEmulatorPaneSession({
         // Prevent mount auto-attach from erasing actionable setup errors.
         suppressAutoAttachRef.current = true
         setError(emulatorStartErrorText(e))
+        // A refused device leaves the live one on screen, so selection and Shut down stay on it.
+        setSelectedUdid((selected) => liveTargetRef.current ?? selected)
         if (tabId) {
-          useAppStore.getState().setTabLabel(tabId, SIMULATOR_DEFAULT_TAB_LABEL)
+          const label = liveTargetRef.current ? session?.info?.displayName : undefined
+          useAppStore.getState().setTabLabel(tabId, label ?? SIMULATOR_DEFAULT_TAB_LABEL)
         }
       } finally {
         if (mountedRef.current && request === attachRequestRef.current) {
@@ -249,6 +249,7 @@ export function useEmulatorPaneSession({
       refreshDevices,
       resetVisualOrientation,
       selectedUdid,
+      session,
       tabId,
       worktreeId
     ]

@@ -1,16 +1,13 @@
-import { releasePairedPortForwardHolds } from './paired-port-forward-holds'
-import { listPairedPortForwards, removePairedPortForward } from './paired-port-forwards'
+import { letGoOfPairedPortForward, pairedPortForwardsHeldBy } from './paired-port-forward-holds'
+import { removePairedPortForward } from './paired-port-forwards'
 
-/** `heldBy` lets go of its forwards on every server, except `keep`; the ones nobody holds when their
- *  turn in the server's queue comes close. */
+/** `heldBy` lets go of its forwards on every server, except `keep`; the ones nobody holds close. */
 export async function releasePairedPortForwards(args: {
   heldBy: string
   keep?: readonly string[]
 }): Promise<void> {
-  const ids = listPairedPortForwards()
-    .map((entry) => entry.id)
-    .filter((id) => !args.keep?.includes(id))
+  const ids = pairedPortForwardsHeldBy(args.heldBy).filter((id) => !args.keep?.includes(id))
   await Promise.all(
-    releasePairedPortForwardHolds(args.heldBy, ids).map((id) => removePairedPortForward(id, true))
+    ids.map((id) => removePairedPortForward(id, () => letGoOfPairedPortForward(id, args.heldBy)))
   )
 }

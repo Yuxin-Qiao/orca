@@ -13,14 +13,9 @@ export function holdPairedPortForward(id: string, holder: string, create: boolea
   }
 }
 
-/** A session's forward, including one its last holder let go that hasn't closed yet. */
+/** A session's forward: listed, never saved. */
 export function isHeldPairedPortForward(id: string): boolean {
   return holdersById.has(id)
-}
-
-/** A let-go forward a session joined again before it closed. */
-export function hasPairedPortForwardHolders(id: string): boolean {
-  return (holdersById.get(id)?.size ?? 0) > 0
 }
 
 /** The forward is a person's now, or gone; true when it was a session's. */
@@ -28,11 +23,18 @@ export function dropPairedPortForwardHolds(id: string): boolean {
   return holdersById.delete(id)
 }
 
-/** Drops `holder` from these forwards; returns the ones nobody holds now, for the caller to close.
- *  They stay a session's until closed, so a session joining one meanwhile keeps it open. */
-export function releasePairedPortForwardHolds(holder: string, ids: readonly string[]): string[] {
-  return ids.filter((id) => {
-    const holders = holdersById.get(id)
-    return holders?.delete(holder) === true && holders.size === 0
-  })
+/** The forwards `holder` holds. */
+export function pairedPortForwardsHeldBy(holder: string): string[] {
+  return [...holdersById].filter(([, holders]) => holders.has(holder)).map(([id]) => id)
+}
+
+/** `holder` lets go; true when nobody holds the forward now, so it should close. Run it in the
+ *  forward's server queue, so it sees every join and adoption queued before it. */
+export function letGoOfPairedPortForward(id: string, holder: string): boolean {
+  const holders = holdersById.get(id)
+  if (!holders?.delete(holder) || holders.size > 0) {
+    return false
+  }
+  holdersById.delete(id)
+  return true
 }
