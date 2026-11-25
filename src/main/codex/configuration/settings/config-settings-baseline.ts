@@ -8,6 +8,7 @@ import {
   readAgentStateJsonFileSync
 } from '../agent-state-file-reader'
 import {
+  recoverInterruptedGuardedFileOperation,
   writeFileAtomically,
   writeFileAtomicallyIfUnchanged
 } from '../../../filesystem/atomic-file-publication'
@@ -68,7 +69,16 @@ export function observeCodexSettingsBaseline(
   runtimeHomePath: string
 ): CodexSettingsBaselineObservation {
   const baselinePath = getCodexSettingsBaselinePath(runtimeHomePath)
-  const baseline = readParsedCodexSettingsBaseline(baselinePath)
+  let baseline = readParsedCodexSettingsBaseline(baselinePath)
+  if (baseline === null) {
+    // A guarded write cut off mid-swap holds the baseline aside; put it back before reading absence.
+    try {
+      recoverInterruptedGuardedFileOperation(baselinePath)
+    } catch {
+      return { kind: 'indeterminate' }
+    }
+    baseline = readParsedCodexSettingsBaseline(baselinePath)
+  }
   if (baseline === 'unreadable') {
     return { kind: 'indeterminate' }
   }
