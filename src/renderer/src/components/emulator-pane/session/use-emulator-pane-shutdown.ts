@@ -44,10 +44,11 @@ export function useEmulatorPaneShutdown({
         const target = emulatorRuntimeTarget(worktreeId)
         const session = acceptedEmulatorStreamSession(worktreeId)
         const started = emulatorSessionStartedHere(worktreeId)
-        const res = (await callRuntimeRpc(target, 'emulator.shutdown', {
-          ...(deviceTarget ? { device: deviceTarget } : {}),
-          worktree: worktreeId
-        })) as { deviceUdid?: string }
+        const res = await callRuntimeRpc<{ deviceUdid?: string } | null>(
+          target,
+          'emulator.shutdown',
+          { ...(deviceTarget ? { device: deviceTarget } : {}), worktree: worktreeId }
+        )
         if (started) {
           noteEmulatorSessionStopped(worktreeId, started.generation)
         }

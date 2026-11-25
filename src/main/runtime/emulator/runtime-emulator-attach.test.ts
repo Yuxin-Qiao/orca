@@ -16,6 +16,7 @@ const agentAndroid: EmulatorSessionInfo = {
 function agentWorkspace(reusable: boolean, late = false) {
   const stopped: string[] = []
   let agentAttached = !late
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a fake of only the bridge calls attach makes on these paths.
   const bridge = {
     getActiveForWorktree: () => (agentAttached ? agentAndroid : null),
     getReusableActiveForWorktree: async () => (reusable && agentAttached ? agentAndroid : null),
@@ -37,6 +38,7 @@ function agentWorkspace(reusable: boolean, late = false) {
       throw new Error('no device should start')
     }
   } as unknown as EmulatorBridge
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a fake of only the host calls attach makes.
   const host = {
     getSettings: () => ({}),
     resolveEmulatorWorkspaceId: async (selector: string) => selector

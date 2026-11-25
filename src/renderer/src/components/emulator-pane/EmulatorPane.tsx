@@ -58,7 +58,7 @@ export default function EmulatorPane({ tab, worktreeId, isActive = true }: Emula
   // A server workspace's stream forward closed (the server disconnected): offer Connect again.
   useEffect(() => {
     const onLost = (event: Event): void => {
-      if ((event as CustomEvent<{ worktreeId?: string }>).detail?.worktreeId === worktreeId) {
+      if (event instanceof CustomEvent && event.detail?.worktreeId === worktreeId) {
         markStreamLost()
       }
     }
