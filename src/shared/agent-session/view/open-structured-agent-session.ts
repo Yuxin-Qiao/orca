@@ -57,6 +57,8 @@ export type StructuredSessionOpenDeps = {
   reveal: (
     target: StructuredSessionOpenTarget
   ) => Promise<StructuredSessionOpenTarget | StructuredSessionOpenFailure>
+  /** Settles once the revealed chat's tab may have arrived; a paired server's tabs stream in after its reply. */
+  awaitTab?: (target: StructuredSessionOpenTarget) => Promise<void>
   current?: () => boolean
 }
 
@@ -269,6 +271,11 @@ export async function openStructuredAgentSession(
         target = reply
         await refresh()
         tab = await activate()
+        if (!tab && deps.awaitTab && current()) {
+          // A failed wait only means the tab did not arrive; the check below says so.
+          await deps.awaitTab(target).catch(() => {})
+          tab = await activate()
+        }
       }
     }
     if (!current()) {

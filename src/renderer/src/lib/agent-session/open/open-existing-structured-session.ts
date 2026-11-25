@@ -11,10 +11,7 @@ import type {
   StructuredSessionOpenTab,
   StructuredSessionOpenFailure
 } from '../../../../../shared/agent-session/view/open-structured-agent-session'
-import {
-  findStructuredAgentSessionTab,
-  activateStructuredAgentSessionById
-} from '../structured-agent-session-tab-activation'
+import * as tabActivation from '../structured-agent-session-tab-activation'
 import { useAppStore } from '@/store/index'
 import { runtimeEnvironmentIdOrLocalUnlessTwin } from '../../workspace/ownership/worktree-runtime-owner'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
@@ -39,7 +36,7 @@ export type StructuredSessionRevealOutcome =
   | 'unreachable'
 
 export type StructuredSessionOpenAdapterDeps = {
-  activate: typeof activateStructuredAgentSessionById
+  activate: typeof tabActivation.activateStructuredAgentSessionById
   tabs: (
     target: { sessionId: string; worktreeId: string },
     owner: RuntimeClientTarget
@@ -53,13 +50,16 @@ export type StructuredSessionOpenAdapterDeps = {
 }
 
 const defaultDeps: StructuredSessionOpenAdapterDeps = {
-  activate: activateStructuredAgentSessionById,
+  activate: tabActivation.activateStructuredAgentSessionById,
   tabs: (target, owner) => {
-    const tab = findStructuredAgentSessionTab(useAppStore.getState().unifiedTabsByWorktree, {
-      workspaceId: target.worktreeId,
-      sessionId: target.sessionId,
-      target: owner
-    })
+    const tab = tabActivation.findStructuredAgentSessionTab(
+      useAppStore.getState().unifiedTabsByWorktree,
+      {
+        workspaceId: target.worktreeId,
+        sessionId: target.sessionId,
+        target: owner
+      }
+    )
     return tab ? [{ id: tab.id, sessionId: tab.entityId, agent: tab.agentSessionAgent }] : []
   },
   refresh: refreshStructuredSessionTabs,
@@ -203,6 +203,7 @@ async function executeDesktopStructuredSession(
         .some((row) => row.id === tab.id && row.sessionId === target.sessionId) &&
       deps.activate({ ...target, target: owner }),
     refresh: (target) => deps.refresh(target.worktreeId, owner),
+    awaitTab: (target) => tabActivation.awaitPairedRevealedTab(owner, target, deps.tabs),
     reveal: async (target) => {
       const outcome = await deps.reveal({ ...target, target: owner })
       return typeof outcome === 'object'

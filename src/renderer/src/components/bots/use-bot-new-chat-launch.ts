@@ -1,10 +1,9 @@
 import { toast } from 'sonner'
-import { activateAiVaultStructuredSession } from '@/lib/agent-session/open/activate-ai-vault-structured-session'
 import { newBotHomeChat, startBotSession } from '@/lib/bot-catalog'
 import type { Bot, BotAgent } from '../../../../shared/bot-types'
-import { folderWorkspaceKey } from '../../../../shared/workspace/identity/workspace-scope'
 import { useConfirmNewHomeChat } from './bot-home-chat-confirm'
 import { botErrorMessage } from './bot-presentation'
+import { openBotChatTab } from './bot-session-open'
 
 export type BotNewChatLaunch = {
   /** A side chat with the bot on `agent`. */
@@ -19,11 +18,7 @@ export function useBotNewChatLaunch(bot: Bot): BotNewChatLaunch {
   // Opens the tab here as well as on the host, refreshing the tab list if it has not arrived yet.
   const opened = (session: Promise<string>): void => {
     void session
-      .then((sessionId) =>
-        activateAiVaultStructuredSession({
-          structuredSession: { workspaceId: folderWorkspaceKey(bot.folderWorkspaceId), sessionId }
-        })
-      )
+      .then((sessionId) => openBotChatTab(bot, sessionId))
       .catch((error: unknown) => toast.error(botErrorMessage(error)))
   }
   return {
