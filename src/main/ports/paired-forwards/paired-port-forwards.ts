@@ -10,7 +10,11 @@ import {
   registerForwardPortHolder
 } from '../../ssh/port-forwarding/forward-local-port-choice'
 import { forwardKey, type ForwardMapping } from '../../ssh/port-forwarding/saved-port-forward-list'
-import { dropPairedPortForwardHolds, holdPairedPortForward } from './paired-port-forward-holds'
+import {
+  dropPairedPortForwardSession,
+  forwardsPortFor,
+  ownPairedPortForward
+} from './paired-port-forward-sessions'
 import {
   forgetSavedPairedPortForwards,
   recordRestoredPortForwardMove,
@@ -120,7 +124,7 @@ export function updatePairedPortForward(
         spec.remotePort,
         spec.label
       )
-      dropPairedPortForwardHolds(spec.id)
+      dropPairedPortForwardSession(spec.id)
       save(spec.environmentId, hostKey, [current])
       return entry
     } catch (error) {
@@ -147,7 +151,7 @@ export async function removePairedPortForward(id: string, when?: () => boolean):
     }
     const hostKey = pairedForwardTunnel(environmentId)?.hostKeyFingerprint
     const removed = await manager.removeForwardAndWait(id)
-    dropPairedPortForwardHolds(id)
+    dropPairedPortForwardSession(id)
     retireIdleTunnel(environmentId)
     save(environmentId, hostKey, removed ? [removed] : [])
     deps?.onChanged(environmentId)
@@ -160,34 +164,32 @@ export function ensurePairedPortForward(args: {
   environmentId: string
   remotePort: number
   label?: string
-  /** The running session (the Mobile Emulator's workspace) whose own forward this is: never saved, on a
-   *  port the OS picks (the server's helper port number is one this computer's own simulators
-   *  start on), closed when released. */
-  heldBy?: string
+  /** The running session (one Mobile Emulator attach) whose own forward this is: never shared or
+   *  saved, on a port the OS picks (the server's helper port number is one this computer's own
+   *  simulators start on), closed when the session ends. */
+  session?: string
 }): Promise<{ entry: PortForwardEntry; created: boolean }> {
   return serializePortForwardChange(forwardChangeKey(args.environmentId), async () => {
     const hostKey = await requireForwardableServer(args.environmentId)
-    // Every paired forward dials the server's own loopback, so its port alone names the service.
+    // Every paired forward dials the server's own loopback, so its port and owner name the service.
     const existing = manager
       .listForwards(args.environmentId)
-      .find((entry) => entry.remotePort === args.remotePort)
+      .find((entry) => forwardsPortFor(entry, args.remotePort, args.session))
     if (existing) {
-      if (args.heldBy) {
-        holdPairedPortForward(existing.id, args.heldBy, false)
-      } else if (dropPairedPortForwardHolds(existing.id)) {
-        save(args.environmentId, hostKey)
-      }
       return { entry: existing, created: false }
     }
     const tunnel = tunnelFor(args.environmentId, hostKey)
     const entry = await addPairedForwardOnFirstFreePort(manager, tunnel, {
-      localPort: args.heldBy ? 0 : args.remotePort,
+      localPort: args.session ? 0 : args.remotePort,
       remoteHost: 'localhost',
       remotePort: args.remotePort,
       label: args.label
     }).catch(retireIdleTunnelAfter(args.environmentId))
-    if (args.heldBy) {
-      holdPairedPortForward(entry.id, args.heldBy, true)
+    // A session that ended while this bound opens nothing.
+    if (args.session && !ownPairedPortForward(entry.id, args.session)) {
+      await manager.removeForwardAndWait(entry.id)
+      retireIdleTunnel(args.environmentId)
+      throw new Error('This emulator session has ended.')
     }
     save(args.environmentId, hostKey)
     deps?.onChanged(args.environmentId)
@@ -271,7 +273,7 @@ async function stopForwards(environmentId: string): Promise<void> {
   disposePairedForwardTunnel(environmentId)
   const forwards = manager.listForwards(environmentId)
   await manager.removeAllForwards(environmentId)
-  forwards.forEach((entry) => dropPairedPortForwardHolds(entry.id))
+  forwards.forEach((entry) => dropPairedPortForwardSession(entry.id))
   if (forwards.length > 0) {
     deps?.onChanged(environmentId)
   }

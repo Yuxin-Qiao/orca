@@ -21,7 +21,11 @@ import {
   restorePairedPortForwards,
   updatePairedPortForward
 } from '../../../ports/paired-forwards/paired-port-forwards'
-import { releasePairedPortForwards } from '../../../ports/paired-forwards/paired-port-forward-release'
+import {
+  endPairedForwardSession,
+  endPairedForwardSessionOnAbort
+} from '../../../ports/paired-forwards/paired-port-forward-session-end'
+import { abortWhenRendererGone } from '../../renderer-requests/renderer-lifetime-abort'
 import {
   restoredPairedPortForwardMovesPending,
   takeRestoredPairedPortForwardMoves
@@ -37,7 +41,7 @@ import { onRuntimeEnvironmentTransportGenerationRetired } from '../connections/r
 const Port = z.number().int().min(1).max(65_535)
 const EnvironmentId = z.string().trim().min(1).max(256)
 const Label = z.string().max(256).optional()
-const Holder = z.string().min(1).max(1024)
+const Session = z.string().min(1).max(128)
 const ForwardSpec = z.object({
   environmentId: EnvironmentId,
   localPort: Port,
@@ -93,27 +97,24 @@ export function registerRuntimeEnvironmentPortForwardHandlers(options: {
   ipcMain.handle('runtimeEnvironments:removePortForward', (_event, input: unknown) =>
     removePairedPortForward(z.object({ id: z.string().min(1).max(64) }).parse(input).id)
   )
-  ipcMain.handle('runtimeEnvironments:ensurePortForward', (_event, input: unknown) =>
-    ensurePairedPortForward(
-      z
-        .object({
-          environmentId: EnvironmentId,
-          remotePort: Port,
-          label: Label,
-          heldBy: Holder.optional()
-        })
-        .parse(input)
-    )
-  )
-  ipcMain.handle('runtimeEnvironments:releasePortForwards', (_event, input: unknown) =>
-    releasePairedPortForwards(
-      z
-        .object({
-          heldBy: Holder,
-          keep: z.array(z.string().min(1).max(64)).max(64).optional()
-        })
-        .parse(input)
-    )
+  ipcMain.handle('runtimeEnvironments:ensurePortForward', (event, input: unknown) => {
+    const args = z
+      .object({
+        environmentId: EnvironmentId,
+        remotePort: Port,
+        label: Label,
+        session: Session.optional()
+      })
+      .parse(input)
+    if (args.session) {
+      // A window that reloads, crashes or closes ends its sessions, so their forwards close too.
+      const lifetime = abortWhenRendererGone(event.sender)
+      endPairedForwardSessionOnAbort(args.session, lifetime.signal, lifetime.dispose)
+    }
+    return ensurePairedPortForward(args)
+  })
+  ipcMain.handle('runtimeEnvironments:endPortForwardSession', (_event, input: unknown) =>
+    endPairedForwardSession(z.object({ session: Session }).parse(input).session)
   )
   ipcMain.handle('runtimeEnvironments:takeRestoredPortForwardMoves', () =>
     takeRestoredPairedPortForwardMoves()

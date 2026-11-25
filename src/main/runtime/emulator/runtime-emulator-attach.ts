@@ -93,6 +93,13 @@ export class RuntimeEmulatorAttach {
           this.notify(worktreeId, active, params.focus)
           return { attached: true, info: active }
         }
+        // Another backend's session is someone else's (an agent's attach, say); never switch it away.
+        if (active) {
+          throw new EmulatorError(
+            'emulator_backend_unsupported',
+            `This workspace's emulator is ${active.backend === 'android' ? 'an Android' : 'an iOS'} device, which this window can't show.`
+          )
+        }
       }
       if (params.userInitiated) {
         const devices = (await bridge.listAllDevices()).filter(ofBackend)

@@ -8,8 +8,9 @@ import { scrcpyDeviceIdFromStreamUrl } from './streaming/emulator-scrcpy-stream-
 import { useEmulatorInputCheck } from './input/use-emulator-input-check'
 import { useTranslate } from '@/i18n/use-translate'
 import { useUiLanguageRevision } from '@/i18n/use-ui-language-revision'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { emulatorServerLabel } from '@/lib/simulator/runtime/emulator-runtime-target'
+import { EMULATOR_STREAM_LOST_EVENT } from '@/lib/simulator/runtime/emulator-runtime-attach'
 
 type EmulatorPaneProps = {
   tab?: Tab
@@ -54,6 +55,16 @@ export default function EmulatorPane({ tab, worktreeId, isActive = true }: Emula
   )
   const visibleError = error ?? inputError
   const serverLabel = useMemo(() => emulatorServerLabel(worktreeId), [worktreeId])
+  // A server workspace's stream forward closed (the server disconnected): offer Connect again.
+  useEffect(() => {
+    const onLost = (event: Event): void => {
+      if ((event as CustomEvent<{ worktreeId?: string }>).detail?.worktreeId === worktreeId) {
+        markStreamLost()
+      }
+    }
+    window.addEventListener(EMULATOR_STREAM_LOST_EVENT, onLost)
+    return () => window.removeEventListener(EMULATOR_STREAM_LOST_EVENT, onLost)
+  }, [markStreamLost, worktreeId])
 
   return (
     <div

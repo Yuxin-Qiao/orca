@@ -14,6 +14,8 @@ import type {
 import { scrcpyDeviceIdFromStreamUrl } from '@/components/emulator-pane/streaming/emulator-scrcpy-stream-url'
 import { formatSimulatorTabLabel } from '../tabs/simulator-tab-label'
 import { emulatorRuntimeTarget } from './emulator-runtime-target'
+import { hasRuntimeRpcErrorCode } from '../../../../../shared/remote-runtime/rpc/runtime-rpc-error-code'
+import { createNonSecureContextUuid } from '../../../../../shared/identifiers/non-secure-context-uuid'
 
 function serverLabel(environmentId: string): string {
   return selectExecutionHostDisplayLabel(
@@ -51,15 +53,56 @@ async function assertServerStreamForwardable(environmentId: string): Promise<voi
   }
 }
 
+type StreamSession = {
+  session: string
+  environmentId: string
+  forwardIds: string[]
+  deviceUdid?: string
+}
+
+/** Each server workspace's live stream: the forwards its latest attach opened, which close when it ends. */
+const streamSessions = new Map<string, StreamSession>()
+const latestAttach = new Map<string, number>()
+let watchingForwards = false
+
+export const EMULATOR_STREAM_LOST_EVENT = 'orca:emulator-stream-lost'
+
+function endStreamSession(session: string): void {
+  void window.api?.runtimeEnvironments?.portForwards?.endSession({ session }).catch(() => {})
+}
+
+/** A server disconnect closes every forward to it; the pane then shows Connect, not a frozen picture. */
+function watchStreamForwards(): void {
+  const api = window.api.runtimeEnvironments.portForwards
+  if (watchingForwards || !api) {
+    return
+  }
+  watchingForwards = true
+  api.onChanged(({ environmentId, forwards }) => {
+    const open = new Set(forwards.map((entry) => entry.id))
+    for (const [worktreeId, live] of streamSessions) {
+      if (live.environmentId === environmentId && !live.forwardIds.some((id) => open.has(id))) {
+        releaseEmulatorStreamForwards(worktreeId)
+        window.dispatchEvent(
+          new CustomEvent(EMULATOR_STREAM_LOST_EVENT, { detail: { worktreeId } })
+        )
+      }
+    }
+  })
+}
+
 /** The server's helper URLs name its own loopback; each is rewritten to a forward of its port here,
- *  held by this workspace so it closes when the workspace's simulator does. */
+ *  opened for this attach alone so it closes when the attach is replaced or ends. */
 async function forwardServerStreamInfo(
   environmentId: string,
   worktreeId: string,
-  info: EmulatorStreamInfo
+  info: EmulatorStreamInfo,
+  attach: number
 ): Promise<EmulatorStreamInfo> {
   const api = window.api.runtimeEnvironments.portForwards!
-  const held: string[] = []
+  watchStreamForwards()
+  const session = createNonSecureContextUuid()
+  const forwardIds: string[] = []
   const forward = async (raw: string | undefined): Promise<string | undefined> => {
     // A ws: control URL names the same helper; read it as http to check its host.
     if (!raw || !isLoopbackBrowserUrl(raw.replace(/^ws/, 'http'))) {
@@ -70,29 +113,45 @@ async function forwardServerStreamInfo(
       environmentId,
       remotePort: Number(url.port) || 80,
       label: formatSimulatorTabLabel(null),
-      heldBy: worktreeId
+      session
     })
-    held.push(entry.id)
+    forwardIds.push(entry.id)
     url.hostname = '127.0.0.1'
     url.port = String(entry.localPort)
     return url.toString()
   }
-  const [streamUrl, url, wsUrl] = await Promise.all([
-    forward(info.streamUrl),
-    forward(info.url),
-    forward(info.wsUrl)
-  ])
-  // The previous device's helper, if any, is no longer this workspace's.
-  void api.release({ heldBy: worktreeId, keep: held }).catch(() => {})
-  return { ...info, streamUrl, url, wsUrl }
+  try {
+    const [streamUrl, url, wsUrl] = await Promise.all([
+      forward(info.streamUrl),
+      forward(info.url),
+      forward(info.wsUrl)
+    ])
+    // A newer attach of this workspace owns its stream; the pane discards this result.
+    if (latestAttach.get(worktreeId) !== attach) {
+      endStreamSession(session)
+      return info
+    }
+    releaseEmulatorStreamForwards(worktreeId)
+    streamSessions.set(worktreeId, {
+      session,
+      environmentId,
+      forwardIds,
+      deviceUdid: info.deviceUdid
+    })
+    return { ...info, streamUrl, url, wsUrl }
+  } catch (error) {
+    endStreamSession(session)
+    throw error
+  }
 }
 
-/** Closes the stream forwards a server workspace's simulator held, once its session has ended.
- *  By holder alone, so a workspace whose owner can no longer be resolved still lets go. */
+/** Closes the stream forwards of a server workspace's simulator once its session has ended. */
 export function releaseEmulatorStreamForwards(worktreeId: string): void {
-  void window.api?.runtimeEnvironments?.portForwards
-    ?.release({ heldBy: worktreeId })
-    .catch(() => {})
+  const live = streamSessions.get(worktreeId)
+  streamSessions.delete(worktreeId)
+  if (live) {
+    endStreamSession(live.session)
+  }
 }
 
 /** Refuses a server's Android device before anything stops or boots: its picture can't reach here. */
@@ -121,25 +180,32 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
   }
   // Checked first, so a server that can't stream here never boots a simulator for this pane.
   await assertServerStreamForwardable(target.environmentId)
+  const attach = (latestAttach.get(worktreeId) ?? 0) + 1
+  latestAttach.set(worktreeId, attach)
   const result = await callRuntimeRpc<TResult>(target, 'emulator.attach', {
     ...params,
     backend: 'ios',
     worktree: worktreeId
+  }).catch((error: unknown) => {
+    // Switching devices stops the old one on the server first, so its stream is gone either way.
+    if (params.device && params.device !== streamSessions.get(worktreeId)?.deviceUdid) {
+      releaseEmulatorStreamForwards(worktreeId)
+    }
+    throw hasRuntimeRpcErrorCode(error, 'emulator_backend_unsupported')
+      ? serverAndroidUnsupportedError(target.environmentId)
+      : error
   })
   if (!result.info) {
     return result
   }
   if (scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
-    // A server older than the backend filter picked Android itself; stop what it started here.
-    await callRuntimeRpc(target, 'emulator.shutdown', {
-      worktree: worktreeId,
-      managedOnly: true
-    }).catch(() => {})
+    // A server older than the backend filter handed back Android. It may be an agent's session, so
+    // it is left running.
     releaseEmulatorStreamForwards(worktreeId)
     throw serverAndroidUnsupportedError(target.environmentId)
   }
   return {
     ...result,
-    info: await forwardServerStreamInfo(target.environmentId, worktreeId, result.info)
+    info: await forwardServerStreamInfo(target.environmentId, worktreeId, result.info, attach)
   }
 }
