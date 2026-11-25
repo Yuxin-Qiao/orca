@@ -21,6 +21,7 @@ import {
   restorePairedPortForwards,
   updatePairedPortForward
 } from '../../../ports/paired-forwards/paired-port-forwards'
+import { releasePairedPortForwards } from '../../../ports/paired-forwards/paired-port-forward-release'
 import {
   restoredPairedPortForwardMovesPending,
   takeRestoredPairedPortForwardMoves
@@ -36,6 +37,7 @@ import { onRuntimeEnvironmentTransportGenerationRetired } from '../connections/r
 const Port = z.number().int().min(1).max(65_535)
 const EnvironmentId = z.string().trim().min(1).max(256)
 const Label = z.string().max(256).optional()
+const Holder = z.string().min(1).max(1024)
 const ForwardSpec = z.object({
   environmentId: EnvironmentId,
   localPort: Port,
@@ -98,7 +100,18 @@ export function registerRuntimeEnvironmentPortForwardHandlers(options: {
           environmentId: EnvironmentId,
           remotePort: Port,
           label: Label,
-          ephemeral: z.boolean().optional()
+          heldBy: Holder.optional()
+        })
+        .parse(input)
+    )
+  )
+  ipcMain.handle('runtimeEnvironments:releasePortForwards', (_event, input: unknown) =>
+    releasePairedPortForwards(
+      z
+        .object({
+          environmentId: EnvironmentId,
+          heldBy: Holder,
+          keep: z.array(z.string().min(1).max(64)).max(64).optional()
         })
         .parse(input)
     )

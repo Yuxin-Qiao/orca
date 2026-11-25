@@ -14,6 +14,7 @@ export const RUNTIME_ENVIRONMENT_HANDLER_CHANNELS = [
   'runtimeEnvironments:updatePortForward',
   'runtimeEnvironments:removePortForward',
   'runtimeEnvironments:ensurePortForward',
+  'runtimeEnvironments:releasePortForwards',
   'runtimeEnvironments:takeRestoredPortForwardMoves',
   'runtimeEnvironments:getStatus',
   'runtimeEnvironments:getStatusSnapshots',

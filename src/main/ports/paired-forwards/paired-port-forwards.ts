@@ -10,10 +10,9 @@ import {
   registerForwardPortHolder
 } from '../../ssh/port-forwarding/forward-local-port-choice'
 import { forwardKey, type ForwardMapping } from '../../ssh/port-forwarding/saved-port-forward-list'
+import { adoptHeldPairedPortForward, holdPairedPortForward } from './paired-port-forward-holds'
 import {
-  adoptUnsavedPairedPortForward,
   forgetSavedPairedPortForwards,
-  markPairedPortForwardUnsaved,
   recordRestoredPortForwardMove,
   savedForwardLocalPorts,
   savedPairedPortForwardEnvironmentIds,
@@ -108,7 +107,6 @@ export function updatePairedPortForward(
     }
     // Held before any await, so a disconnect during the probe cancels the edit.
     const tunnel = tunnelFor(spec.environmentId, hostKey)
-    adoptUnsavedPairedPortForward(spec.id)
     // The forward being edited answers on its own port, and rebinds both loopbacks there itself.
     if (current.localPort !== spec.localPort) {
       await assertLoopbackPortFree(spec.localPort)
@@ -122,6 +120,7 @@ export function updatePairedPortForward(
         spec.remotePort,
         spec.label
       )
+      adoptHeldPairedPortForward(spec.id)
       save(spec.environmentId, hostKey, [current])
       return entry
     } catch (error) {
@@ -156,9 +155,9 @@ export function ensurePairedPortForward(args: {
   environmentId: string
   remotePort: number
   label?: string
-  /** A running session's own forward (the Mobile Emulator's stream): listed while live, never saved,
-   *  and on a port the OS picks, since serve-sim kills whatever listens on the port it starts on. */
-  ephemeral?: boolean
+  /** The running session (the Mobile Emulator's workspace) whose own forward this is: never saved, on a
+   *  port the OS picks (serve-sim kills whatever listens on its port), closed when released. */
+  heldBy?: string
 }): Promise<{ entry: PortForwardEntry; created: boolean }> {
   return serializePortForwardChange(forwardChangeKey(args.environmentId), async () => {
     const hostKey = await requireForwardableServer(args.environmentId)
@@ -167,20 +166,22 @@ export function ensurePairedPortForward(args: {
       .listForwards(args.environmentId)
       .find((entry) => entry.remotePort === args.remotePort)
     if (existing) {
-      if (!args.ephemeral && adoptUnsavedPairedPortForward(existing.id)) {
+      if (args.heldBy) {
+        holdPairedPortForward(existing.id, args.heldBy, false)
+      } else if (adoptHeldPairedPortForward(existing.id)) {
         save(args.environmentId, hostKey)
       }
       return { entry: existing, created: false }
     }
     const tunnel = tunnelFor(args.environmentId, hostKey)
     const entry = await addPairedForwardOnFirstFreePort(manager, tunnel, {
-      localPort: args.ephemeral ? 0 : args.remotePort,
+      localPort: args.heldBy ? 0 : args.remotePort,
       remoteHost: 'localhost',
       remotePort: args.remotePort,
       label: args.label
     }).catch(retireIdleTunnelAfter(args.environmentId))
-    if (args.ephemeral) {
-      markPairedPortForwardUnsaved(entry.id)
+    if (args.heldBy) {
+      holdPairedPortForward(entry.id, args.heldBy, true)
     }
     save(args.environmentId, hostKey)
     deps?.onChanged(args.environmentId)

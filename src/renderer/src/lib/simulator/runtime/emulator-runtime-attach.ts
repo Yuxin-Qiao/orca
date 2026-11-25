@@ -51,26 +51,28 @@ async function assertServerStreamForwardable(environmentId: string): Promise<voi
   }
 }
 
-/** The server's helper URLs name its own loopback; each is rewritten to a forward of its port here. */
+/** The server's helper URLs name its own loopback; each is rewritten to a forward of its port here,
+ *  held by this workspace so it closes when the workspace's simulator does. */
 async function forwardServerStreamInfo(
   environmentId: string,
+  worktreeId: string,
   info: EmulatorStreamInfo
 ): Promise<EmulatorStreamInfo> {
-  if (scrcpyDeviceIdFromStreamUrl(info.streamUrl)) {
-    throw serverAndroidUnsupportedError(environmentId)
-  }
+  const api = window.api.runtimeEnvironments.portForwards!
+  const held: string[] = []
   const forward = async (raw: string | undefined): Promise<string | undefined> => {
     // A ws: control URL names the same helper; read it as http to check its host.
     if (!raw || !isLoopbackBrowserUrl(raw.replace(/^ws/, 'http'))) {
       return undefined
     }
     const url = new URL(raw)
-    const { entry } = await window.api.runtimeEnvironments.portForwards!.ensure({
+    const { entry } = await api.ensure({
       environmentId,
       remotePort: Number(url.port) || 80,
       label: formatSimulatorTabLabel(null),
-      ephemeral: true
+      heldBy: worktreeId
     })
+    held.push(entry.id)
     url.hostname = '127.0.0.1'
     url.port = String(entry.localPort)
     return url.toString()
@@ -80,7 +82,21 @@ async function forwardServerStreamInfo(
     forward(info.url),
     forward(info.wsUrl)
   ])
+  // The previous device's helper, if any, is no longer this workspace's.
+  void api.release({ environmentId, heldBy: worktreeId, keep: held }).catch(() => {})
   return { ...info, streamUrl, url, wsUrl }
+}
+
+/** Closes the stream forwards a server workspace's simulator held, once its session has ended. */
+export function releaseEmulatorStreamForwards(
+  worktreeId: string,
+  target: RuntimeClientTarget
+): void {
+  if (target.kind === 'environment') {
+    void window.api.runtimeEnvironments.portForwards
+      ?.release({ environmentId: target.environmentId, heldBy: worktreeId })
+      .catch(() => {})
+  }
 }
 
 /** `emulator.attach` on the host that owns the workspace, with stream URLs this desktop can dial. */
@@ -107,7 +123,20 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
     ...params,
     worktree: worktreeId
   })
-  return result.info
-    ? { ...result, info: await forwardServerStreamInfo(target.environmentId, result.info) }
-    : result
+  if (!result.info) {
+    return result
+  }
+  if (scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
+    // The server picked Android itself; stop what it started for this pane, which can't show it.
+    await callRuntimeRpc(target, 'emulator.shutdown', {
+      worktree: worktreeId,
+      managedOnly: true
+    }).catch(() => {})
+    releaseEmulatorStreamForwards(worktreeId, target)
+    throw serverAndroidUnsupportedError(target.environmentId)
+  }
+  return {
+    ...result,
+    info: await forwardServerStreamInfo(target.environmentId, worktreeId, result.info)
+  }
 }
