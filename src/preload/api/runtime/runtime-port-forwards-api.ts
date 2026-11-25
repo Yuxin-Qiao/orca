@@ -29,9 +29,8 @@ export type RuntimePortForwardsPreloadApi = {
     label?: string
     heldBy?: string
   }) => Promise<{ entry: PortForwardEntry; created: boolean }>
-  /** `heldBy` lets go of its forwards (on every server unless one is named) except `keep`; the
-   *  ones nobody holds now close. */
-  release: (args: { environmentId?: string; heldBy: string; keep?: string[] }) => Promise<void>
+  /** `heldBy` lets go of its forwards on every server except `keep`; the ones nobody holds close. */
+  release: (args: { heldBy: string; keep?: string[] }) => Promise<void>
   /** Restored forwards that moved off a busy port here; each is returned to one caller, once. */
   takeRestoredMoves: () => Promise<RestoredPortForwardMove[]>
   onChanged: (callback: (event: RuntimeEnvironmentPortForwardsChanged) => void) => () => void

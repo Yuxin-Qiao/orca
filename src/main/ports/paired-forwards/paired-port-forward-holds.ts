@@ -2,8 +2,8 @@
 // holding each: listed while held, never saved, closed once the last holder lets go.
 const holdersById = new Map<string, Set<string>>()
 
-/** `holder` keeps the forward; a forward nobody holds yet is held only when `create` is set, so a
- *  session never takes over a forward a person made. */
+/** `holder` keeps the forward; a forward that isn't a session's is held only when `create` is set,
+ *  so a session never takes over a forward a person made. */
 export function holdPairedPortForward(id: string, holder: string, create: boolean): void {
   const holders = holdersById.get(id)
   if (holders) {
@@ -13,23 +13,26 @@ export function holdPairedPortForward(id: string, holder: string, create: boolea
   }
 }
 
+/** A session's forward, including one its last holder let go that hasn't closed yet. */
 export function isHeldPairedPortForward(id: string): boolean {
   return holdersById.has(id)
 }
 
-/** A person's ensure or edit makes a held forward theirs; true when it was held. */
-export function adoptHeldPairedPortForward(id: string): boolean {
+/** A let-go forward a session joined again before it closed. */
+export function hasPairedPortForwardHolders(id: string): boolean {
+  return (holdersById.get(id)?.size ?? 0) > 0
+}
+
+/** The forward is a person's now, or gone; true when it was a session's. */
+export function dropPairedPortForwardHolds(id: string): boolean {
   return holdersById.delete(id)
 }
 
-/** Drops `holder` from these forwards; returns the ones nobody holds now, for the caller to close. */
+/** Drops `holder` from these forwards; returns the ones nobody holds now, for the caller to close.
+ *  They stay a session's until closed, so a session joining one meanwhile keeps it open. */
 export function releasePairedPortForwardHolds(holder: string, ids: readonly string[]): string[] {
   return ids.filter((id) => {
     const holders = holdersById.get(id)
-    if (!holders?.delete(holder) || holders.size > 0) {
-      return false
-    }
-    holdersById.delete(id)
-    return true
+    return holders?.delete(holder) === true && holders.size === 0
   })
 }

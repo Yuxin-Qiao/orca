@@ -129,6 +129,9 @@ export const LogcatParams = z.object({
 export const AttachParams = z.object({
   userInitiated: z.boolean().optional(),
   device: z.string().optional(),
+  /** Only devices of this backend: a paired desktop can show a server's iOS simulators, not its
+   *  Android emulators. Older servers drop it, so their callers still check what attached. */
+  backend: z.enum(['ios', 'android']).optional(),
   worktree: z.string().optional(),
   focus: z.boolean().optional()
 })

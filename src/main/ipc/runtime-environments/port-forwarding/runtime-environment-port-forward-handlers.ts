@@ -109,7 +109,6 @@ export function registerRuntimeEnvironmentPortForwardHandlers(options: {
     releasePairedPortForwards(
       z
         .object({
-          environmentId: EnvironmentId.optional(),
           heldBy: Holder,
           keep: z.array(z.string().min(1).max(64)).max(64).optional()
         })

@@ -10,7 +10,11 @@ import {
   registerForwardPortHolder
 } from '../../ssh/port-forwarding/forward-local-port-choice'
 import { forwardKey, type ForwardMapping } from '../../ssh/port-forwarding/saved-port-forward-list'
-import { adoptHeldPairedPortForward, holdPairedPortForward } from './paired-port-forward-holds'
+import {
+  dropPairedPortForwardHolds,
+  hasPairedPortForwardHolders,
+  holdPairedPortForward
+} from './paired-port-forward-holds'
 import {
   forgetSavedPairedPortForwards,
   recordRestoredPortForwardMove,
@@ -120,7 +124,7 @@ export function updatePairedPortForward(
         spec.remotePort,
         spec.label
       )
-      adoptHeldPairedPortForward(spec.id)
+      dropPairedPortForwardHolds(spec.id)
       save(spec.environmentId, hostKey, [current])
       return entry
     } catch (error) {
@@ -135,14 +139,19 @@ export function updatePairedPortForward(
   })
 }
 
-export async function removePairedPortForward(id: string): Promise<boolean> {
+/** `onlyUnheld`: a session's forward closes only if no session joined it again while this waited. */
+export async function removePairedPortForward(id: string, onlyUnheld = false): Promise<boolean> {
   const environmentId = manager.listForwards().find((entry) => entry.id === id)?.connectionId
   if (!environmentId) {
     return false
   }
   return serializePortForwardChange(forwardChangeKey(environmentId), async () => {
+    if (onlyUnheld && hasPairedPortForwardHolders(id)) {
+      return false
+    }
     const hostKey = pairedForwardTunnel(environmentId)?.hostKeyFingerprint
     const removed = await manager.removeForwardAndWait(id)
+    dropPairedPortForwardHolds(id)
     retireIdleTunnel(environmentId)
     save(environmentId, hostKey, removed ? [removed] : [])
     deps?.onChanged(environmentId)
@@ -168,7 +177,7 @@ export function ensurePairedPortForward(args: {
     if (existing) {
       if (args.heldBy) {
         holdPairedPortForward(existing.id, args.heldBy, false)
-      } else if (adoptHeldPairedPortForward(existing.id)) {
+      } else if (dropPairedPortForwardHolds(existing.id)) {
         save(args.environmentId, hostKey)
       }
       return { entry: existing, created: false }
@@ -263,9 +272,10 @@ export function forgetPairedPortForwards(environmentId: string): Promise<void> {
 
 async function stopForwards(environmentId: string): Promise<void> {
   disposePairedForwardTunnel(environmentId)
-  const hadForwards = manager.listForwards(environmentId).length > 0
+  const forwards = manager.listForwards(environmentId)
   await manager.removeAllForwards(environmentId)
-  if (hadForwards) {
+  forwards.forEach((entry) => dropPairedPortForwardHolds(entry.id))
+  if (forwards.length > 0) {
     deps?.onChanged(environmentId)
   }
 }

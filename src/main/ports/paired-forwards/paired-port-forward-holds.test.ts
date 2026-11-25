@@ -58,11 +58,23 @@ describe('held paired port forwards', () => {
     expect(shared).toEqual({ entry: first.entry, created: false })
     expect(saved.has('env-1')).toBe(false)
 
-    await releasePairedPortForwards({ environmentId: 'env-1', heldBy: 'a' })
+    await releasePairedPortForwards({ heldBy: 'a' })
     expect(listPairedPortForwards('env-1')).toEqual([first.entry])
-    // A holder whose server can no longer be named still lets go.
     await releasePairedPortForwards({ heldBy: 'b' })
     expect(listPairedPortForwards('env-1')).toEqual([])
+  })
+
+  it('stays open for a session that joins it while its last holder lets go', async () => {
+    configure(new Map())
+    const remotePort = await freePort()
+    const first = await ensurePairedPortForward({ environmentId: 'env-1', remotePort, heldBy: 'a' })
+
+    // The join queues first; the release lands while the join is still resolving the server.
+    const joined = ensurePairedPortForward({ environmentId: 'env-1', remotePort, heldBy: 'b' })
+    const released = releasePairedPortForwards({ heldBy: 'a' })
+    await Promise.all([joined, released])
+
+    expect(listPairedPortForwards('env-1')).toEqual([first.entry])
   })
 
   it('becomes a saved forward once a person ensures it, and then outlives its holder', async () => {
@@ -72,7 +84,7 @@ describe('held paired port forwards', () => {
 
     const held = await ensurePairedPortForward({ environmentId: 'env-1', remotePort, heldBy: 'a' })
     await ensurePairedPortForward({ environmentId: 'env-1', remotePort })
-    await releasePairedPortForwards({ environmentId: 'env-1', heldBy: 'a' })
+    await releasePairedPortForwards({ heldBy: 'a' })
 
     expect(listPairedPortForwards('env-1')).toEqual([held.entry])
     expect(saved.get('env-1')).toMatchObject({

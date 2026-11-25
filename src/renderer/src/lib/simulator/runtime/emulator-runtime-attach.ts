@@ -83,7 +83,7 @@ async function forwardServerStreamInfo(
     forward(info.wsUrl)
   ])
   // The previous device's helper, if any, is no longer this workspace's.
-  void api.release({ environmentId, heldBy: worktreeId, keep: held }).catch(() => {})
+  void api.release({ heldBy: worktreeId, keep: held }).catch(() => {})
   return { ...info, streamUrl, url, wsUrl }
 }
 
@@ -95,35 +95,42 @@ export function releaseEmulatorStreamForwards(worktreeId: string): void {
     .catch(() => {})
 }
 
-/** `emulator.attach` on the host that owns the workspace, with stream URLs this desktop can dial. */
-export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorStreamInfo }>(
-  worktreeId: string,
-  params: { device?: string } & Record<string, unknown>,
-  target: RuntimeClientTarget = emulatorRuntimeTarget(worktreeId),
-  /** The pane's device list, so a server's Android device is refused before it boots. */
-  devices: readonly SimulatorDeviceRow[] = []
-): Promise<TResult> {
-  if (target.kind === 'local') {
-    return callRuntimeRpc<TResult>(target, 'emulator.attach', { ...params, worktree: worktreeId })
-  }
-  const { device } = params
+/** Refuses a server's Android device before anything stops or boots: its picture can't reach here. */
+export function assertEmulatorDeviceShownHere(
+  target: RuntimeClientTarget,
+  devices: readonly SimulatorDeviceRow[],
+  device: string | undefined
+): void {
   if (
+    target.kind === 'environment' &&
     device &&
     devices.some((d) => d.backend === 'android' && (d.udid === device || d.name === device))
   ) {
     throw serverAndroidUnsupportedError(target.environmentId)
   }
+}
+
+/** `emulator.attach` on the host that owns the workspace, with stream URLs this desktop can dial. */
+export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorStreamInfo }>(
+  worktreeId: string,
+  params: Record<string, unknown>,
+  target: RuntimeClientTarget = emulatorRuntimeTarget(worktreeId)
+): Promise<TResult> {
+  if (target.kind === 'local') {
+    return callRuntimeRpc<TResult>(target, 'emulator.attach', { ...params, worktree: worktreeId })
+  }
   // Checked first, so a server that can't stream here never boots a simulator for this pane.
   await assertServerStreamForwardable(target.environmentId)
   const result = await callRuntimeRpc<TResult>(target, 'emulator.attach', {
     ...params,
+    backend: 'ios',
     worktree: worktreeId
   })
   if (!result.info) {
     return result
   }
   if (scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
-    // The server picked Android itself; stop what it started for this pane, which can't show it.
+    // A server older than the backend filter picked Android itself; stop what it started here.
     await callRuntimeRpc(target, 'emulator.shutdown', {
       worktree: worktreeId,
       managedOnly: true

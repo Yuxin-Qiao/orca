@@ -7,7 +7,7 @@ import {
   resolveEmulatorOpeningPreference
 } from '../../emulator/emulator-opening-preference'
 import type { RuntimeEmulatorCommandHost } from './runtime-emulator-commands'
-import type { EmulatorSessionInfo } from '../../emulator/emulator-types'
+import type { EmulatorBackendKind, EmulatorSessionInfo } from '../../emulator/emulator-types'
 import {
   getEmulatorOpeningMode,
   type EmulatorSelectionRequired
@@ -15,6 +15,8 @@ import {
 
 export type RuntimeEmulatorAttachParams = {
   device?: string
+  /** Only devices of this backend; a paired desktop shows a server's iOS simulators only. */
+  backend?: EmulatorBackendKind
   worktree?: string
   focus?: boolean
   userInitiated?: boolean
@@ -85,13 +87,15 @@ export class RuntimeEmulatorAttach {
       if (!device && worktreeId) {
         const active = await bridge.getReusableActiveForWorktree(worktreeId)
         assertCurrent()
-        if (active) {
+        if (active && (!params.backend || active.backend === params.backend)) {
           this.notify(worktreeId, active, params.focus)
           return { attached: true, info: active }
         }
       }
       if (params.userInitiated) {
-        const devices = await bridge.listAllDevices()
+        const devices = (await bridge.listAllDevices()).filter(
+          (item) => !params.backend || item.backend === params.backend
+        )
         assertCurrent()
         if (!device) {
           const selection = resolveEmulatorOpeningPreference(

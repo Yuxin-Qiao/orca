@@ -4,7 +4,10 @@ import { useConfiguredDefaultEmulatorUdid } from './use-configured-default-emula
 import { supportsEmulatorOpeningPreferences } from '@/lib/simulator/launch/emulator-opening-preferences-capability'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
-import { attachEmulatorOnRuntime } from '@/lib/simulator/runtime/emulator-runtime-attach'
+import {
+  assertEmulatorDeviceShownHere,
+  attachEmulatorOnRuntime
+} from '@/lib/simulator/runtime/emulator-runtime-attach'
 import { useAppStore } from '@/store/index'
 import {
   deviceLabel,
@@ -168,6 +171,7 @@ export function useEmulatorPaneSession({
           deviceTarget ||
           (!automatic ? (selectedUdid ?? configuredDefaultUdid ?? undefined) : undefined)
         requestedTarget = target
+        assertEmulatorDeviceShownHere(runtimeTarget, list, target)
         if (target) {
           setSelectedUdid(target)
         }
@@ -189,8 +193,7 @@ export function useEmulatorPaneSession({
               ...(supportsPreferences ? { userInitiated: true } : {}),
               focus: false
             },
-            runtimeTarget,
-            list
+            runtimeTarget
           )
         )
         if (request !== attachRequestRef.current) {
