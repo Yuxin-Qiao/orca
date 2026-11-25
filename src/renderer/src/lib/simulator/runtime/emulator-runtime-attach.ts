@@ -53,19 +53,30 @@ async function assertServerStreamForwardable(environmentId: string): Promise<voi
   }
 }
 
-type StreamSession = {
+type AcceptedStream = {
   session: string
   environmentId: string
   forwardIds: string[]
   deviceUdid?: string
 }
 
-/** Each server workspace's live stream: the forwards its latest attach opened, which close when it ends. */
-const streamSessions = new Map<string, StreamSession>()
-const latestAttach = new Map<string, number>()
+/** One server workspace's attaches: the latest one started, and the stream this desktop accepted.
+ *  Every cleanup goes through it, so an attach that lost the race never closes a newer stream. */
+type WorkspaceStream = { generation: number; accepted?: AcceptedStream }
+
+const workspaceStreams = new Map<string, WorkspaceStream>()
 let watchingForwards = false
 
 export const EMULATOR_STREAM_LOST_EVENT = 'orca:emulator-stream-lost'
+
+function workspaceStream(worktreeId: string): WorkspaceStream {
+  let stream = workspaceStreams.get(worktreeId)
+  if (!stream) {
+    stream = { generation: 0 }
+    workspaceStreams.set(worktreeId, stream)
+  }
+  return stream
+}
 
 function endStreamSession(session: string): void {
   void window.api?.runtimeEnvironments?.portForwards?.endSession({ session }).catch(() => {})
@@ -80,9 +91,12 @@ function watchStreamForwards(): void {
   watchingForwards = true
   api.onChanged(({ environmentId, forwards }) => {
     const open = new Set(forwards.map((entry) => entry.id))
-    for (const [worktreeId, live] of streamSessions) {
-      if (live.environmentId === environmentId && !live.forwardIds.some((id) => open.has(id))) {
-        releaseEmulatorStreamForwards(worktreeId)
+    for (const [worktreeId, { accepted }] of workspaceStreams) {
+      if (
+        accepted?.environmentId === environmentId &&
+        !accepted.forwardIds.some((id) => open.has(id))
+      ) {
+        releaseEmulatorStream(worktreeId, accepted.session)
         window.dispatchEvent(
           new CustomEvent(EMULATOR_STREAM_LOST_EVENT, { detail: { worktreeId } })
         )
@@ -97,7 +111,7 @@ async function forwardServerStreamInfo(
   environmentId: string,
   worktreeId: string,
   info: EmulatorStreamInfo,
-  attach: number
+  generation: number
 ): Promise<EmulatorStreamInfo> {
   const api = window.api.runtimeEnvironments.portForwards!
   watchStreamForwards()
@@ -120,38 +134,49 @@ async function forwardServerStreamInfo(
     url.port = String(entry.localPort)
     return url.toString()
   }
+  const stream = workspaceStream(worktreeId)
   try {
     const [streamUrl, url, wsUrl] = await Promise.all([
       forward(info.streamUrl),
       forward(info.url),
       forward(info.wsUrl)
     ])
-    // A newer attach of this workspace owns its stream; the pane discards this result.
-    if (latestAttach.get(worktreeId) !== attach) {
+    if (stream.generation !== generation) {
+      // A newer attach owns this workspace's stream; this result is discarded, never dialed.
       endStreamSession(session)
-      return info
+      return { ...info, streamUrl: undefined, url: undefined, wsUrl: undefined }
     }
-    releaseEmulatorStreamForwards(worktreeId)
-    streamSessions.set(worktreeId, {
-      session,
-      environmentId,
-      forwardIds,
-      deviceUdid: info.deviceUdid
-    })
+    const previous = stream.accepted
+    stream.accepted = { session, environmentId, forwardIds, deviceUdid: info.deviceUdid }
+    if (previous) {
+      endStreamSession(previous.session)
+    }
     return { ...info, streamUrl, url, wsUrl }
   } catch (error) {
     endStreamSession(session)
+    // The server already moved this workspace to another device; the old stream is gone either way.
+    if (stream.generation === generation && stream.accepted?.deviceUdid !== info.deviceUdid) {
+      releaseEmulatorStream(worktreeId)
+    }
     throw error
   }
 }
 
-/** Closes the stream forwards of a server workspace's simulator once its session has ended. */
-export function releaseEmulatorStreamForwards(worktreeId: string): void {
-  const live = streamSessions.get(worktreeId)
-  streamSessions.delete(worktreeId)
-  if (live) {
-    endStreamSession(live.session)
+/** The stream session this desktop accepted for a server workspace, if any. */
+export function acceptedEmulatorStreamSession(worktreeId: string): string | undefined {
+  return workspaceStreams.get(worktreeId)?.accepted?.session
+}
+
+/** Closes a server workspace's accepted stream; `session` limits it to that one, so a cleanup that
+ *  started before a newer attach leaves the newer stream alone. */
+export function releaseEmulatorStream(worktreeId: string, session?: string): void {
+  const stream = workspaceStreams.get(worktreeId)
+  const accepted = stream?.accepted
+  if (!stream || !accepted || (session !== undefined && accepted.session !== session)) {
+    return
   }
+  stream.accepted = undefined
+  endStreamSession(accepted.session)
 }
 
 /** Refuses a server's Android device before anything stops or boots: its picture can't reach here. */
@@ -180,32 +205,41 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
   }
   // Checked first, so a server that can't stream here never boots a simulator for this pane.
   await assertServerStreamForwardable(target.environmentId)
-  const attach = (latestAttach.get(worktreeId) ?? 0) + 1
-  latestAttach.set(worktreeId, attach)
+  const stream = workspaceStream(worktreeId)
+  const generation = ++stream.generation
+  // Only the latest attach may close the stream it replaces.
+  const replaced = (deviceUdid: string | undefined): void => {
+    if (stream.generation === generation && stream.accepted?.deviceUdid !== deviceUdid) {
+      releaseEmulatorStream(worktreeId)
+    }
+  }
   const result = await callRuntimeRpc<TResult>(target, 'emulator.attach', {
     ...params,
     backend: 'ios',
     worktree: worktreeId
   }).catch((error: unknown) => {
     // Switching devices stops the old one on the server first, so its stream is gone either way.
-    if (params.device && params.device !== streamSessions.get(worktreeId)?.deviceUdid) {
-      releaseEmulatorStreamForwards(worktreeId)
+    if (typeof params.device === 'string') {
+      replaced(params.device)
     }
     throw hasRuntimeRpcErrorCode(error, 'emulator_backend_unsupported')
       ? serverAndroidUnsupportedError(target.environmentId)
       : error
   })
   if (!result.info) {
+    if (typeof params.device === 'string') {
+      replaced(params.device)
+    }
     return result
   }
   if (scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
     // A server older than the backend filter handed back Android. It may be an agent's session, so
     // it is left running.
-    releaseEmulatorStreamForwards(worktreeId)
+    replaced(result.info.deviceUdid)
     throw serverAndroidUnsupportedError(target.environmentId)
   }
   return {
     ...result,
-    info: await forwardServerStreamInfo(target.environmentId, worktreeId, result.info, attach)
+    info: await forwardServerStreamInfo(target.environmentId, worktreeId, result.info, generation)
   }
 }

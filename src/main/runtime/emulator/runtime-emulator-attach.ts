@@ -27,6 +27,25 @@ type Result = {
   selectionRequired?: EmulatorSelectionRequired
 }
 
+type ListedDevice = Awaited<ReturnType<EmulatorBridge['listAllDevices']>>[number]
+
+/** A device's id, or an Android AVD's name, which Android attaches also accept. */
+function namesDevice(item: ListedDevice, device: string): boolean {
+  return (
+    item.id === device ||
+    (item.backend === 'android' &&
+      ['avd', 'emulator'].includes(item.detail ?? '') &&
+      item.name === device)
+  )
+}
+
+function otherBackendError(backend: EmulatorBackendKind | undefined): EmulatorError {
+  return new EmulatorError(
+    'emulator_backend_unsupported',
+    `This emulator is ${backend === 'android' ? 'an Android' : 'an iOS'} device, which this window can't show.`
+  )
+}
+
 export class RuntimeEmulatorAttach {
   private choiceGeneration = 0
   private readonly pendingByWorkspace = new Map<string | undefined, symbol>()
@@ -62,7 +81,7 @@ export class RuntimeEmulatorAttach {
         )
       }
     }
-    let selectedDevice: Awaited<ReturnType<EmulatorBridge['listAllDevices']>>[number] | undefined
+    let selectedDevice: ListedDevice | undefined
     const remember = () => {
       if (
         choiceGeneration === undefined ||
@@ -87,22 +106,33 @@ export class RuntimeEmulatorAttach {
       assertCurrent()
       let device = params.device
       if (!device && worktreeId) {
+        // Another backend's session is someone else's (an agent's attach, say), streaming or not;
+        // never switch it away.
+        const current = bridge.getActiveForWorktree(worktreeId)
+        if (current && !ofBackend(current)) {
+          throw otherBackendError(current.backend)
+        }
         const active = await bridge.getReusableActiveForWorktree(worktreeId)
         assertCurrent()
-        if (active && ofBackend(active)) {
+        if (active) {
           this.notify(worktreeId, active, params.focus)
           return { attached: true, info: active }
         }
-        // Another backend's session is someone else's (an agent's attach, say); never switch it away.
-        if (active) {
-          throw new EmulatorError(
-            'emulator_backend_unsupported',
-            `This workspace's emulator is ${active.backend === 'android' ? 'an Android' : 'an iOS'} device, which this window can't show.`
-          )
+      }
+      // Listing runs simctl and adb, so one attach lists at most once.
+      let listed: Promise<ListedDevice[]> | undefined
+      const listAll = (): Promise<ListedDevice[]> => (listed ??= bridge.listAllDevices())
+      const explicit = device
+      if (explicit && params.backend) {
+        const named = (await listAll()).find((item) => namesDevice(item, explicit))
+        assertCurrent()
+        if (named && !ofBackend(named)) {
+          throw otherBackendError(named.backend)
         }
       }
       if (params.userInitiated) {
-        const devices = (await bridge.listAllDevices()).filter(ofBackend)
+        const all = await listAll()
+        const devices = all.filter(ofBackend)
         assertCurrent()
         if (!device) {
           const selection = resolveEmulatorOpeningPreference(
@@ -111,22 +141,22 @@ export class RuntimeEmulatorAttach {
             worktreeId ? bridge.getActiveForWorktree(worktreeId)?.deviceUdid : undefined
           )
           if ('selectionRequired' in selection) {
-            return { attached: false, ...selection }
+            // A saved device of a backend this caller can't show is still there, not missing.
+            const hidden = selection.selectionRequired === 'missing' && devices.length < all.length
+            return {
+              attached: false,
+              selectionRequired: hidden ? 'ask' : selection.selectionRequired
+            }
           }
           device = selection.device
         }
-        selectedDevice = devices.find(
-          (item) =>
-            item.id === device ||
-            (item.backend === 'android' &&
-              ['avd', 'emulator'].includes(item.detail ?? '') &&
-              item.name === device)
-        )
+        const chosen = device
+        selectedDevice = devices.find((item) => namesDevice(item, chosen))
         if (!selectedDevice || selectedDevice.isAvailable === false) {
           return { attached: false, selectionRequired: selectedDevice ? 'unavailable' : 'missing' }
         }
       } else {
-        const listAllDevices = async () => (await bridge.listAllDevices()).filter(ofBackend)
+        const listAllDevices = async () => (await listAll()).filter(ofBackend)
         device ??= await resolveDefaultAttachDevice(
           { listAllDevices },
           {

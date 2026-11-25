@@ -13,7 +13,8 @@ import { forwardKey, type ForwardMapping } from '../../ssh/port-forwarding/saved
 import {
   dropPairedPortForwardSession,
   forwardsPortFor,
-  ownPairedPortForward
+  ownPairedPortForward,
+  type SessionForwardRemoval
 } from './paired-port-forward-sessions'
 import {
   forgetSavedPairedPortForwards,
@@ -139,14 +140,15 @@ export function updatePairedPortForward(
   })
 }
 
-/** `when` decides in the server's queue, after every change queued before this removal. */
-export async function removePairedPortForward(id: string, when?: () => boolean): Promise<boolean> {
-  const environmentId = manager.listForwards().find((entry) => entry.id === id)?.connectionId
+/** `only`: a session's removal, decided in the server's queue after every change queued before it. */
+export async function removePairedPortForward(id: string, only?: SessionForwardRemoval) {
+  const environmentId =
+    only?.environmentId ?? manager.listForwards().find((entry) => entry.id === id)?.connectionId
   if (!environmentId) {
     return false
   }
   return serializePortForwardChange(forwardChangeKey(environmentId), async () => {
-    if (when && !when()) {
+    if (only && !only.when()) {
       return false
     }
     const hostKey = pairedForwardTunnel(environmentId)?.hostKeyFingerprint
@@ -186,7 +188,7 @@ export function ensurePairedPortForward(args: {
       label: args.label
     }).catch(retireIdleTunnelAfter(args.environmentId))
     // A session that ended while this bound opens nothing.
-    if (args.session && !ownPairedPortForward(entry.id, args.session)) {
+    if (args.session && !ownPairedPortForward(entry.id, args.session, args.environmentId)) {
       await manager.removeForwardAndWait(entry.id)
       retireIdleTunnel(args.environmentId)
       throw new Error('This emulator session has ended.')

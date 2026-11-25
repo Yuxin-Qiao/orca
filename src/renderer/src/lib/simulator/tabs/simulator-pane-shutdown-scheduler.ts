@@ -1,5 +1,8 @@
 import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
-import { releaseEmulatorStreamForwards } from '@/lib/simulator/runtime/emulator-runtime-attach'
+import {
+  acceptedEmulatorStreamSession,
+  releaseEmulatorStream
+} from '@/lib/simulator/runtime/emulator-runtime-attach'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import { useAppStore } from '@/store/index'
 import { shouldShutdownSimulatorForPaneUnmountFromTabs } from './simulator-tab-shutdown'
@@ -27,14 +30,18 @@ function getUnifiedTabsForWorktree(worktreeId: string): SimulatorTabReference[] 
 }
 
 async function shutdownManagedSimulator(worktreeId: string): Promise<void> {
+  const target = emulatorRuntimeTarget(worktreeId)
+  const session = acceptedEmulatorStreamSession(worktreeId)
+  // On a server only a session this desktop accepted is its to stop; an agent's may run there too.
+  if (target.kind === 'environment' && !session) {
+    return
+  }
   try {
-    await callRuntimeRpc(emulatorRuntimeTarget(worktreeId), 'emulator.shutdown', {
-      worktree: worktreeId,
-      managedOnly: true
-    })
+    await callRuntimeRpc(target, 'emulator.shutdown', { worktree: worktreeId, managedOnly: true })
   } finally {
-    // No pane shows this workspace's simulator any more, whatever the server answered.
-    releaseEmulatorStreamForwards(worktreeId)
+    if (session) {
+      releaseEmulatorStream(worktreeId, session)
+    }
   }
 }
 

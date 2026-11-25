@@ -11,8 +11,11 @@ export async function endPairedForwardSession(session: string): Promise<void> {
   lifetimes.get(session)?.()
   lifetimes.delete(session)
   await Promise.all(
-    endPairedPortForwardSession(session).map((id) =>
-      removePairedPortForward(id, () => pairedPortForwardSession(id) === session)
+    endPairedPortForwardSession(session).map(({ id, environmentId }) =>
+      removePairedPortForward(id, {
+        environmentId,
+        when: () => pairedPortForwardSession(id) === session
+      })
     )
   )
 }
