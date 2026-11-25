@@ -161,7 +161,8 @@ export function ensurePairedPortForward(args: {
   remotePort: number
   label?: string
   /** The running session (the Mobile Emulator's workspace) whose own forward this is: never saved, on a
-   *  port the OS picks (serve-sim kills whatever listens on its port), closed when released. */
+   *  port the OS picks (the server's helper port number is one this computer's own simulators
+   *  start on), closed when released. */
   heldBy?: string
 }): Promise<{ entry: PortForwardEntry; created: boolean }> {
   return serializePortForwardChange(forwardChangeKey(args.environmentId), async () => {

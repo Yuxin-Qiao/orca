@@ -45,7 +45,7 @@ describe('held paired port forwards', () => {
   it('stay off the server port number, unsaved, and open until their last holder lets go', async () => {
     const saved = new Map<string, unknown>()
     configure(saved)
-    // Free here, so only the held rule keeps the forward off it: serve-sim kills its port's listener.
+    // Free here, so only the held rule keeps the forward off the number local simulators start on.
     const remotePort = await freePort()
 
     const first = await ensurePairedPortForward({ environmentId: 'env-1', remotePort, heldBy: 'a' })
