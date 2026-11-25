@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { waitForStructuredSessionTab } from './wait-for-structured-session-tab'
+import { openStructuredAgentSession } from '../../../../../shared/agent-session/view/open-structured-agent-session'
+import {
+  createPairedRevealedTabWait,
+  waitForStructuredSessionTab
+} from './wait-for-structured-session-tab'
 
 function store(): {
   subscribe: (listener: () => void) => () => void
@@ -46,5 +50,89 @@ describe('waitForStructuredSessionTab', () => {
     await waiting
     expect(settled).toBe(true)
     expect(changes.size()).toBe(0)
+  })
+})
+
+describe('createPairedRevealedTabWait through the shared open', () => {
+  const target = { sessionId: 'chat-a', worktreeId: 'folder:bot-home' }
+  type Tab = { id: string; sessionId: string }
+
+  /** A paired server whose revealed tab for chat A streams in only when `deliverA` runs. */
+  function pairedOpen(selection: { key: string; front: string | null }) {
+    const changes = store()
+    let tabs: Tab[] = []
+    const activated: string[] = []
+    const guard = createPairedRevealedTabWait({
+      paired: true,
+      hasTab: (t) => tabs.some((row) => row.sessionId === t.sessionId),
+      selection: (t) => ({ key: selection.key, showsTarget: selection.front === t.sessionId }),
+      subscribe: changes.subscribe,
+      timeoutMs: 5_000
+    })
+    let waiting!: () => void
+    const waitStarted = new Promise<void>((resolve) => {
+      waiting = resolve
+    })
+    const result = openStructuredAgentSession(
+      { kind: 'history', structuredSession: { ...target, workspaceId: target.worktreeId } },
+      {
+        locate: async () => ({ location: { kind: 'chat', ...target } }),
+        tabs: () => tabs,
+        refresh: async () => {},
+        activate: (tab) => {
+          activated.push(tab.sessionId)
+          selection.front = tab.sessionId
+          return true
+        },
+        reveal: async () => target,
+        awaitTab: (t) => {
+          const wait = guard.awaitTab(t)
+          waiting()
+          return wait
+        },
+        current: guard.current
+      }
+    )
+    const deliverA = (): void => {
+      tabs = [{ id: 'agent-session:chat-a', sessionId: 'chat-a' }]
+      changes.emit()
+    }
+    return { result, waitStarted, deliverA, activated }
+  }
+
+  it('opens chat A when nothing else was selected while it waited', async () => {
+    const open = pairedOpen({ key: 'workspace-a|tab-1', front: 'tab-1' })
+    await open.waitStarted
+    open.deliverA()
+    await expect(open.result).resolves.toMatchObject({ kind: 'opened' })
+    expect(open.activated).toEqual(['chat-a'])
+  })
+
+  it('leaves a chat B the user selected during the wait in front', async () => {
+    const selection = { key: 'workspace-a|tab-1', front: 'tab-1' as string | null }
+    const open = pairedOpen(selection)
+    await open.waitStarted
+    // The user opens mirrored chat B while A's tab is still on its way.
+    selection.key = 'workspace-b|chat-b'
+    selection.front = 'chat-b'
+    open.deliverA()
+    await expect(open.result).resolves.toEqual({ kind: 'superseded' })
+    expect(open.activated).toEqual([])
+    expect(selection.front).toBe('chat-b')
+  })
+
+  it('yields to a newer desktop open even before the selection changes', async () => {
+    const open = pairedOpen({ key: 'workspace-a|tab-1', front: 'tab-1' })
+    await open.waitStarted
+    createPairedRevealedTabWait({
+      paired: true,
+      hasTab: () => true,
+      selection: () => ({ key: '', showsTarget: false }),
+      subscribe: () => () => {},
+      timeoutMs: 5_000
+    })
+    open.deliverA()
+    await expect(open.result).resolves.toEqual({ kind: 'superseded' })
+    expect(open.activated).toEqual([])
   })
 })

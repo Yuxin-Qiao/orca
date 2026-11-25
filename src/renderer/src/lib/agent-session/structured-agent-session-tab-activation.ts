@@ -10,10 +10,8 @@ import {
 } from '@/runtime/native-chat/session-ownership/structured-agent-session-owner'
 import { toRuntimeWorktreeSelector } from '@/runtime/rpc/targets/runtime-worktree-selector'
 import type { Tab } from '../../../../shared/workspace-layout/tab-groups/tab-types'
-import { waitForStructuredSessionTab } from './open/wait-for-structured-session-tab'
 
-// Matches the open's other host round-trips; past it the open reports that the tab never appeared.
-const PAIRED_REVEALED_TAB_WAIT_MS = 5_000
+export { pairedRevealedTabWait } from './open/paired-revealed-tab-wait'
 
 export function findStructuredAgentSessionTab(
   unifiedTabsByWorktree: Readonly<Record<string, readonly Tab[]>>,
@@ -94,26 +92,4 @@ export function activateStructuredAgentSessionById(args: {
         target: args.target
       })
     : false
-}
-
-/**
- * Waits for a paired server's revealed chat tab: the server replies before its workspace stream
- * delivers the tab here. A local refresh already applied its inventory, so a local open never waits.
- */
-export function awaitPairedRevealedTab(
-  owner: RuntimeClientTarget,
-  target: { sessionId: string; worktreeId: string },
-  tabs: (
-    target: { sessionId: string; worktreeId: string },
-    owner: RuntimeClientTarget
-  ) => readonly { sessionId: string }[]
-): Promise<void> {
-  if (owner.kind !== 'environment') {
-    return Promise.resolve()
-  }
-  return waitForStructuredSessionTab(
-    () => tabs(target, owner).some((row) => row.sessionId === target.sessionId),
-    (listener) => useAppStore.subscribe(listener),
-    PAIRED_REVEALED_TAB_WAIT_MS
-  )
 }

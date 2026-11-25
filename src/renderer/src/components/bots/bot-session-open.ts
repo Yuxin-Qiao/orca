@@ -1,35 +1,73 @@
 import { activateAiVaultStructuredSession } from '@/lib/agent-session/open/activate-ai-vault-structured-session'
 import { targetBotChatLatest } from '@/lib/agent-session/open/bot-link-item-target'
 import { botTarget, callBotRpc } from '@/lib/bot-hosts'
-import { openBotHome } from '@/lib/bot-catalog'
+import { activateAndRevealFolderWorkspaceWithOutcome } from '@/lib/workspace/activation/worktree-activation'
+import { showChatOpenUnavailable } from '@/lib/agent-session/open/chat-open-failure-toast'
 import { runtimeTargetEnvironmentId } from '@/runtime/rpc/targets/runtime-client-target'
-import { LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host/execution-host'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  type ExecutionHostId
+} from '../../../../shared/execution-host/execution-host'
 import { selectFocusedChatTab } from '@/lib/focused-chat-workers'
 import { useAppStore } from '@/store'
 import { requestNativeChatComposerFocus } from '@/components/native-chat/composer/focus/native-chat-composer-focus-intent'
 import type { Bot } from '../../../../shared/bot-types'
 import { folderWorkspaceKey } from '../../../../shared/workspace/identity/workspace-scope'
 
-/** A server bot's chat tabs reach this window only through its home's workspace stream, so the
- *  home opens here first, as a Slack link's does. This computer's bots publish their tabs directly. */
-async function openServerBotHome(bot: Bot): Promise<void> {
-  if (bot.hostId === LOCAL_EXECUTION_HOST_ID || openBotHome(bot)) {
-    return
-  }
-  // The home must be in the catalog before it can open.
-  await useAppStore
-    .getState()
-    .fetchFolderWorkspaces({ runtimeEnvironmentId: runtimeTargetEnvironmentId(botTarget(bot)) })
-  openBotHome(bot)
+/** Raw cause for the open toast's details, like the open path's own causes. */
+const HOME_DID_NOT_OPEN = "The bot's home did not open on this computer."
+
+function admitHome(bot: Bot): ReturnType<typeof activateAndRevealFolderWorkspaceWithOutcome> {
+  return activateAndRevealFolderWorkspaceWithOutcome(bot.folderWorkspaceId, {
+    executionHostId: bot.hostId,
+    // Bots are not rows of the workspace list, so there is nothing there to reveal.
+    revealInSidebar: false
+  })
 }
 
-/** Opens one of the bot's chats as a focused tab, on the host that runs the bot. */
+/** A server bot's chat tabs reach this window only through its home's workspace stream, so the
+ *  home opens here first, as a Slack link's does. This computer's bots publish their tabs directly.
+ *  `notified`: the refusal already told the user why (a blocked folder path). */
+async function admitServerBotHome(bot: Bot): Promise<'opened' | 'refused' | 'notified'> {
+  // The catalog stamps each bot with the host that listed it; the wire schema only knows this one.
+  const hostId: ExecutionHostId = bot.hostId
+  if (hostId === LOCAL_EXECUTION_HOST_ID) {
+    return 'opened'
+  }
+  let outcome = admitHome(bot)
+  if ('refused' in outcome && outcome.refused.reason === 'workspace-missing') {
+    // The home must be in the catalog before it can open; a failed read leaves it refused.
+    try {
+      await useAppStore
+        .getState()
+        .fetchFolderWorkspaces({ runtimeEnvironmentId: runtimeTargetEnvironmentId(botTarget(bot)) })
+    } catch {
+      /* Reported below as a home that did not open, with Retry. */
+    }
+    outcome = admitHome(bot)
+  }
+  return 'opened' in outcome ? 'opened' : outcome.refused.failureNotified ? 'notified' : 'refused'
+}
+
+/** Opens one of the bot's chats as a focused tab, on the host that runs the bot. Retry repeats both
+ *  steps for this same chat, so a home that failed to load gets another try and nothing starts anew. */
 export async function openBotChatTab(bot: Bot, sessionId: string): Promise<boolean> {
-  await openServerBotHome(bot)
+  const retry = (): Promise<boolean> => openBotChatTab(bot, sessionId)
+  const home = await admitServerBotHome(bot)
+  if (home !== 'opened') {
+    if (home === 'refused') {
+      showChatOpenUnavailable({
+        detail: HOME_DID_NOT_OPEN,
+        retry: () => void retry().catch(() => {})
+      })
+    }
+    return false
+  }
   return activateAiVaultStructuredSession(
     { structuredSession: { sessionId, workspaceId: folderWorkspaceKey(bot.folderWorkspaceId) } },
     undefined,
-    botTarget(bot)
+    botTarget(bot),
+    retry
   )
 }
 

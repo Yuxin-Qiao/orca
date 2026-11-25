@@ -203,7 +203,7 @@ async function executeDesktopStructuredSession(
         .some((row) => row.id === tab.id && row.sessionId === target.sessionId) &&
       deps.activate({ ...target, target: owner }),
     refresh: (target) => deps.refresh(target.worktreeId, owner),
-    awaitTab: (target) => tabActivation.awaitPairedRevealedTab(owner, target, deps.tabs),
+    ...tabActivation.pairedRevealedTabWait(owner, deps.tabs),
     reveal: async (target) => {
       const outcome = await deps.reveal({ ...target, target: owner })
       return typeof outcome === 'object'
