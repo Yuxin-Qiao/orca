@@ -135,14 +135,17 @@ export class RuntimeEmulatorAttach {
         const devices = all.filter(ofBackend)
         assertCurrent()
         if (!device) {
-          const selection = resolveEmulatorOpeningPreference(
-            settings,
-            devices,
-            worktreeId ? bridge.getActiveForWorktree(worktreeId)?.deviceUdid : undefined
-          )
+          const current = worktreeId
+            ? bridge.getActiveForWorktree(worktreeId)?.deviceUdid
+            : undefined
+          const selection = resolveEmulatorOpeningPreference(settings, devices, current)
           if ('selectionRequired' in selection) {
             // A saved device of a backend this caller can't show is still there, not missing.
-            const hidden = selection.selectionRequired === 'missing' && devices.length < all.length
+            // The saved device is still there when the full list finds it; it is just another backend.
+            const unfiltered = resolveEmulatorOpeningPreference(settings, all, current)
+            const hidden =
+              selection.selectionRequired === 'missing' &&
+              !('selectionRequired' in unfiltered && unfiltered.selectionRequired === 'missing')
             return {
               attached: false,
               selectionRequired: hidden ? 'ask' : selection.selectionRequired
@@ -182,6 +185,11 @@ export class RuntimeEmulatorAttach {
           remember()
           this.notify(worktreeId, reusable, params.focus)
           return { attached: true, info: reusable }
+        }
+        // An agent may have attached another backend since the check above; never switch it away.
+        const switching = bridge.getActiveForWorktree(worktreeId)
+        if (!params.device && switching && !ofBackend(switching)) {
+          throw otherBackendError(switching.backend)
         }
         await bridge.stopActiveForSwitch(worktreeId)
         assertCurrent()

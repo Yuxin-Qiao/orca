@@ -56,13 +56,15 @@ async function assertServerStreamForwardable(environmentId: string): Promise<voi
 type AcceptedStream = {
   session: string
   environmentId: string
-  forwardIds: string[]
+  /** Each forward's local port, which the pane's URLs name. */
+  forwards: Map<string, number>
   deviceUdid?: string
 }
 
-/** One server workspace's attaches: the latest one started, and the stream this desktop accepted.
+/** One server workspace's attaches: the latest one started, the stream this desktop accepted, and
+ *  whether this desktop started the server session that is running (so closing the pane stops it).
  *  Every cleanup goes through it, so an attach that lost the race never closes a newer stream. */
-type WorkspaceStream = { generation: number; accepted?: AcceptedStream }
+type WorkspaceStream = { generation: number; accepted?: AcceptedStream; startedHere?: boolean }
 
 const workspaceStreams = new Map<string, WorkspaceStream>()
 let watchingForwards = false
@@ -90,12 +92,11 @@ function watchStreamForwards(): void {
   }
   watchingForwards = true
   api.onChanged(({ environmentId, forwards }) => {
-    const open = new Set(forwards.map((entry) => entry.id))
+    const open = new Map(forwards.map((entry) => [entry.id, entry.localPort]))
     for (const [worktreeId, { accepted }] of workspaceStreams) {
-      if (
-        accepted?.environmentId === environmentId &&
-        !accepted.forwardIds.some((id) => open.has(id))
-      ) {
+      // Closed, or moved to another port in Ports: either way the pane's URLs no longer reach it.
+      const moved = [...(accepted?.forwards ?? [])].some(([id, port]) => open.get(id) !== port)
+      if (accepted?.environmentId === environmentId && moved) {
         releaseEmulatorStream(worktreeId, accepted.session)
         window.dispatchEvent(
           new CustomEvent(EMULATOR_STREAM_LOST_EVENT, { detail: { worktreeId } })
@@ -116,7 +117,7 @@ async function forwardServerStreamInfo(
   const api = window.api.runtimeEnvironments.portForwards!
   watchStreamForwards()
   const session = createNonSecureContextUuid()
-  const forwardIds: string[] = []
+  const forwards = new Map<string, number>()
   const forward = async (raw: string | undefined): Promise<string | undefined> => {
     // A ws: control URL names the same helper; read it as http to check its host.
     if (!raw || !isLoopbackBrowserUrl(raw.replace(/^ws/, 'http'))) {
@@ -129,7 +130,7 @@ async function forwardServerStreamInfo(
       label: formatSimulatorTabLabel(null),
       session
     })
-    forwardIds.push(entry.id)
+    forwards.set(entry.id, entry.localPort)
     url.hostname = '127.0.0.1'
     url.port = String(entry.localPort)
     return url.toString()
@@ -147,7 +148,7 @@ async function forwardServerStreamInfo(
       return { ...info, streamUrl: undefined, url: undefined, wsUrl: undefined }
     }
     const previous = stream.accepted
-    stream.accepted = { session, environmentId, forwardIds, deviceUdid: info.deviceUdid }
+    stream.accepted = { session, environmentId, forwards, deviceUdid: info.deviceUdid }
     if (previous) {
       endStreamSession(previous.session)
     }
@@ -165,6 +166,19 @@ async function forwardServerStreamInfo(
 /** The stream session this desktop accepted for a server workspace, if any. */
 export function acceptedEmulatorStreamSession(worktreeId: string): string | undefined {
   return workspaceStreams.get(worktreeId)?.accepted?.session
+}
+
+/** This desktop started (or took over) the server session that runs now, so it may stop it. */
+export function emulatorSessionStartedHere(worktreeId: string): boolean {
+  return workspaceStreams.get(worktreeId)?.startedHere === true
+}
+
+/** The server session is stopped; a later close has nothing of this desktop's to stop. */
+export function noteEmulatorSessionStopped(worktreeId: string): void {
+  const stream = workspaceStreams.get(worktreeId)
+  if (stream) {
+    stream.startedHere = false
+  }
 }
 
 /** Closes a server workspace's accepted stream; `session` limits it to that one, so a cleanup that
@@ -231,6 +245,10 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
       replaced(params.device)
     }
     return result
+  }
+  if (!scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
+    // The server now runs this desktop's session, whether or not its stream reaches here.
+    stream.startedHere = true
   }
   if (scrcpyDeviceIdFromStreamUrl(result.info.streamUrl)) {
     // A server older than the backend filter handed back Android. It may be an agent's session, so

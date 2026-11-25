@@ -1,6 +1,7 @@
 import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
 import {
   acceptedEmulatorStreamSession,
+  noteEmulatorSessionStopped,
   releaseEmulatorStream
 } from '@/lib/simulator/runtime/emulator-runtime-attach'
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react'
@@ -45,6 +46,7 @@ export function useEmulatorPaneShutdown({
           ...(deviceTarget ? { device: deviceTarget } : {}),
           worktree: worktreeId
         })) as { deviceUdid?: string }
+        noteEmulatorSessionStopped(worktreeId)
         if (session) {
           releaseEmulatorStream(worktreeId, session)
         }

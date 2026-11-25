@@ -1,6 +1,8 @@
 import { emulatorRuntimeTarget } from '@/lib/simulator/runtime/emulator-runtime-target'
 import {
   acceptedEmulatorStreamSession,
+  emulatorSessionStartedHere,
+  noteEmulatorSessionStopped,
   releaseEmulatorStream
 } from '@/lib/simulator/runtime/emulator-runtime-attach'
 import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
@@ -32,12 +34,13 @@ function getUnifiedTabsForWorktree(worktreeId: string): SimulatorTabReference[] 
 async function shutdownManagedSimulator(worktreeId: string): Promise<void> {
   const target = emulatorRuntimeTarget(worktreeId)
   const session = acceptedEmulatorStreamSession(worktreeId)
-  // On a server only a session this desktop accepted is its to stop; an agent's may run there too.
-  if (target.kind === 'environment' && !session) {
+  // On a server only a session this desktop started is its to stop; an agent's may run there too.
+  if (target.kind === 'environment' && !emulatorSessionStartedHere(worktreeId)) {
     return
   }
   try {
     await callRuntimeRpc(target, 'emulator.shutdown', { worktree: worktreeId, managedOnly: true })
+    noteEmulatorSessionStopped(worktreeId)
   } finally {
     if (session) {
       releaseEmulatorStream(worktreeId, session)

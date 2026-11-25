@@ -20,6 +20,7 @@ import {
 } from '../tabs/simulator-pane-shutdown-scheduler'
 import { assertClientCreationActionAvailable } from '../../workspace/creation/surface-policy/client-creation-action-policy'
 import { getRuntimeTargetHostId } from '@/runtime/rpc/targets/runtime-client-target'
+import type { RuntimeClientTarget } from '../../../../../shared/remote-runtime/host-catalog/runtime-client-target'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../../../shared/execution-host/execution-host'
 import { emulatorRuntimeTarget } from '../runtime/emulator-runtime-target'
 import { attachEmulatorOnRuntime } from '../runtime/emulator-runtime-attach'
@@ -67,7 +68,14 @@ export async function openMobileEmulatorTab(
   if (store.settings?.mobileEmulatorEnabled === false) {
     return null
   }
-  const target = emulatorRuntimeTarget(worktreeId)
+  let target: RuntimeClientTarget
+  try {
+    target = emulatorRuntimeTarget(worktreeId)
+  } catch (error) {
+    // Callers fire and forget, so the person hears why nothing opened.
+    toast.error(getLaunchErrorMessage(error))
+    return null
+  }
   const executionHostId = getRuntimeTargetHostId(target)
   // Builds before this one stamped a server workspace's simulator tab with this desktop.
   const existingTab =
