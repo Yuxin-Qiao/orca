@@ -41,7 +41,7 @@ export function useEmulatorPaneShutdown({
           ...(deviceTarget ? { device: deviceTarget } : {}),
           worktree: worktreeId
         })) as { deviceUdid?: string }
-        releaseEmulatorStreamForwards(worktreeId, target)
+        releaseEmulatorStreamForwards(worktreeId)
         const shutdownTarget = res?.deviceUdid || deviceTarget
         window.dispatchEvent(
           new CustomEvent(EMULATOR_LOCAL_SHUTDOWN_EVENT, {

@@ -87,16 +87,12 @@ async function forwardServerStreamInfo(
   return { ...info, streamUrl, url, wsUrl }
 }
 
-/** Closes the stream forwards a server workspace's simulator held, once its session has ended. */
-export function releaseEmulatorStreamForwards(
-  worktreeId: string,
-  target: RuntimeClientTarget
-): void {
-  if (target.kind === 'environment') {
-    void window.api.runtimeEnvironments.portForwards
-      ?.release({ environmentId: target.environmentId, heldBy: worktreeId })
-      .catch(() => {})
-  }
+/** Closes the stream forwards a server workspace's simulator held, once its session has ended.
+ *  By holder alone, so a workspace whose owner can no longer be resolved still lets go. */
+export function releaseEmulatorStreamForwards(worktreeId: string): void {
+  void window.api?.runtimeEnvironments?.portForwards
+    ?.release({ heldBy: worktreeId })
+    .catch(() => {})
 }
 
 /** `emulator.attach` on the host that owns the workspace, with stream URLs this desktop can dial. */
@@ -132,7 +128,7 @@ export async function attachEmulatorOnRuntime<TResult extends { info?: EmulatorS
       worktree: worktreeId,
       managedOnly: true
     }).catch(() => {})
-    releaseEmulatorStreamForwards(worktreeId, target)
+    releaseEmulatorStreamForwards(worktreeId)
     throw serverAndroidUnsupportedError(target.environmentId)
   }
   return {

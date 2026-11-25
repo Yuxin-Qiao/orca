@@ -27,9 +27,15 @@ function getUnifiedTabsForWorktree(worktreeId: string): SimulatorTabReference[] 
 }
 
 async function shutdownManagedSimulator(worktreeId: string): Promise<void> {
-  const target = emulatorRuntimeTarget(worktreeId)
-  await callRuntimeRpc(target, 'emulator.shutdown', { worktree: worktreeId, managedOnly: true })
-  releaseEmulatorStreamForwards(worktreeId, target)
+  try {
+    await callRuntimeRpc(emulatorRuntimeTarget(worktreeId), 'emulator.shutdown', {
+      worktree: worktreeId,
+      managedOnly: true
+    })
+  } finally {
+    // No pane shows this workspace's simulator any more, whatever the server answered.
+    releaseEmulatorStreamForwards(worktreeId)
+  }
 }
 
 export async function shutdownManagedSimulatorIfNoPane(

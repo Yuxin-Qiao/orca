@@ -60,7 +60,8 @@ describe('held paired port forwards', () => {
 
     await releasePairedPortForwards({ environmentId: 'env-1', heldBy: 'a' })
     expect(listPairedPortForwards('env-1')).toEqual([first.entry])
-    await releasePairedPortForwards({ environmentId: 'env-1', heldBy: 'b' })
+    // A holder whose server can no longer be named still lets go.
+    await releasePairedPortForwards({ heldBy: 'b' })
     expect(listPairedPortForwards('env-1')).toEqual([])
   })
 

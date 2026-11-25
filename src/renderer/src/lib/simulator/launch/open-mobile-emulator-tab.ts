@@ -20,6 +20,7 @@ import {
 } from '../tabs/simulator-pane-shutdown-scheduler'
 import { assertClientCreationActionAvailable } from '../../workspace/creation/surface-policy/client-creation-action-policy'
 import { getRuntimeTargetHostId } from '@/runtime/rpc/targets/runtime-client-target'
+import { LOCAL_EXECUTION_HOST_ID } from '../../../../../shared/execution-host/execution-host'
 import { emulatorRuntimeTarget } from '../runtime/emulator-runtime-target'
 import { attachEmulatorOnRuntime } from '../runtime/emulator-runtime-attach'
 import type { EmulatorStreamInfo } from '@/components/emulator-pane/session/emulator-pane-types'
@@ -68,7 +69,12 @@ export async function openMobileEmulatorTab(
   }
   const target = emulatorRuntimeTarget(worktreeId)
   const executionHostId = getRuntimeTargetHostId(target)
-  const existingTab = getSimulatorTabForWorktree(worktreeId, executionHostId)
+  // Builds before this one stamped a server workspace's simulator tab with this desktop.
+  const existingTab =
+    getSimulatorTabForWorktree(worktreeId, executionHostId) ??
+    (target.kind === 'environment'
+      ? getSimulatorTabForWorktree(worktreeId, LOCAL_EXECUTION_HOST_ID)
+      : null)
   if (existingTab) {
     return existingTab.id
   }
