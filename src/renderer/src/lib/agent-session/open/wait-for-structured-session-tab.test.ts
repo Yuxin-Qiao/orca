@@ -109,7 +109,10 @@ describe('createPairedRevealedTabWait through the shared open', () => {
   })
 
   it('leaves a chat B the user selected during the wait in front', async () => {
-    const selection = { key: 'workspace-a|tab-1', front: 'tab-1' as string | null }
+    const selection: { key: string; front: string | null } = {
+      key: 'workspace-a|tab-1',
+      front: 'tab-1'
+    }
     const open = pairedOpen(selection)
     await open.waitStarted
     // The user opens mirrored chat B while A's tab is still on its way.

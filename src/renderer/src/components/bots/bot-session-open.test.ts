@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Bot } from '../../../../shared/bot-types'
 
 const mocks = vi.hoisted(() => ({
   admit: vi.fn(),
@@ -44,12 +43,7 @@ const opened = { opened: {} }
 const missing = { refused: { reason: 'workspace-missing', failureNotified: false } }
 const blocked = { refused: { reason: 'path-blocked', failureNotified: true } }
 
-// The catalog stamps a server's bots with its host; the wire schema types only this computer's.
-const serverBot = {
-  id: 'bot-1',
-  folderWorkspaceId: 'home-1',
-  hostId: 'runtime:env-1'
-} as unknown as Bot
+const serverBot = { folderWorkspaceId: 'home-1', hostId: 'runtime:env-1' } as const
 
 describe('openBotChatTab', () => {
   beforeEach(() => {
@@ -98,9 +92,12 @@ describe('openBotChatTab', () => {
   it('a failed chat open’s Retry repeats the Home step too', async () => {
     mocks.admit.mockReturnValue(opened)
     await openBotChatTab(serverBot, 'chat-1')
-    const retry = mocks.activate.mock.calls[0][3] as () => Promise<boolean>
+    const retry: unknown = mocks.activate.mock.calls[0][3]
     mocks.admit.mockClear()
-    await retry()
+    expect(retry).toBeTypeOf('function')
+    if (typeof retry === 'function') {
+      await retry()
+    }
     expect(mocks.admit).toHaveBeenCalledTimes(1)
     expect(mocks.activate).toHaveBeenCalledTimes(2)
     expect(mocks.activate.mock.calls[1][0]).toEqual(mocks.activate.mock.calls[0][0])
@@ -114,7 +111,7 @@ describe('openBotChatTab', () => {
   })
 
   it('opens a bot on this computer without a Home step', async () => {
-    const localBot = { ...serverBot, hostId: 'local' } as unknown as Bot
+    const localBot = { ...serverBot, hostId: 'local' } as const
     await openBotChatTab(localBot, 'chat-1')
     expect(mocks.admit).not.toHaveBeenCalled()
     expect(mocks.activate).toHaveBeenCalledTimes(1)

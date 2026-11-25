@@ -1,23 +1,23 @@
 import { activateAiVaultStructuredSession } from '@/lib/agent-session/open/activate-ai-vault-structured-session'
 import { targetBotChatLatest } from '@/lib/agent-session/open/bot-link-item-target'
-import { botTarget, callBotRpc } from '@/lib/bot-hosts'
+import { botTarget, callBotRpc, type BotOnHost } from '@/lib/bot-hosts'
 import { activateAndRevealFolderWorkspaceWithOutcome } from '@/lib/workspace/activation/worktree-activation'
 import { showChatOpenUnavailable } from '@/lib/agent-session/open/chat-open-failure-toast'
 import { runtimeTargetEnvironmentId } from '@/runtime/rpc/targets/runtime-client-target'
-import {
-  LOCAL_EXECUTION_HOST_ID,
-  type ExecutionHostId
-} from '../../../../shared/execution-host/execution-host'
+import { LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host/execution-host'
 import { selectFocusedChatTab } from '@/lib/focused-chat-workers'
 import { useAppStore } from '@/store'
 import { requestNativeChatComposerFocus } from '@/components/native-chat/composer/focus/native-chat-composer-focus-intent'
 import type { Bot } from '../../../../shared/bot-types'
 import { folderWorkspaceKey } from '../../../../shared/workspace/identity/workspace-scope'
 
+/** A bot's home as the catalog stamps it: on the host that listed the bot, not only this computer. */
+type BotHome = Pick<Bot, 'folderWorkspaceId'> & BotOnHost
+
 /** Raw cause for the open toast's details, like the open path's own causes. */
 const HOME_DID_NOT_OPEN = "The bot's home did not open on this computer."
 
-function admitHome(bot: Bot): ReturnType<typeof activateAndRevealFolderWorkspaceWithOutcome> {
+function admitHome(bot: BotHome): ReturnType<typeof activateAndRevealFolderWorkspaceWithOutcome> {
   return activateAndRevealFolderWorkspaceWithOutcome(bot.folderWorkspaceId, {
     executionHostId: bot.hostId,
     // Bots are not rows of the workspace list, so there is nothing there to reveal.
@@ -28,10 +28,8 @@ function admitHome(bot: Bot): ReturnType<typeof activateAndRevealFolderWorkspace
 /** A server bot's chat tabs reach this window only through its home's workspace stream, so the
  *  home opens here first, as a Slack link's does. This computer's bots publish their tabs directly.
  *  `notified`: the refusal already told the user why (a blocked folder path). */
-async function admitServerBotHome(bot: Bot): Promise<'opened' | 'refused' | 'notified'> {
-  // The catalog stamps each bot with the host that listed it; the wire schema only knows this one.
-  const hostId: ExecutionHostId = bot.hostId
-  if (hostId === LOCAL_EXECUTION_HOST_ID) {
+async function admitServerBotHome(bot: BotHome): Promise<'opened' | 'refused' | 'notified'> {
+  if (bot.hostId === LOCAL_EXECUTION_HOST_ID) {
     return 'opened'
   }
   let outcome = admitHome(bot)
@@ -51,7 +49,7 @@ async function admitServerBotHome(bot: Bot): Promise<'opened' | 'refused' | 'not
 
 /** Opens one of the bot's chats as a focused tab, on the host that runs the bot. Retry repeats both
  *  steps for this same chat, so a home that failed to load gets another try and nothing starts anew. */
-export async function openBotChatTab(bot: Bot, sessionId: string): Promise<boolean> {
+export async function openBotChatTab(bot: BotHome, sessionId: string): Promise<boolean> {
   const retry = (): Promise<boolean> => openBotChatTab(bot, sessionId)
   const home = await admitServerBotHome(bot)
   if (home !== 'opened') {
