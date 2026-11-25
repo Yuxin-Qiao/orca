@@ -69,7 +69,7 @@ async function forwardServerStreamInfo(
       environmentId,
       remotePort: Number(url.port) || 80,
       label: formatSimulatorTabLabel(null),
-      persist: false
+      ephemeral: true
     })
     url.hostname = '127.0.0.1'
     url.port = String(entry.localPort)

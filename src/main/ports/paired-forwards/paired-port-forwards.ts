@@ -156,8 +156,9 @@ export function ensurePairedPortForward(args: {
   environmentId: string
   remotePort: number
   label?: string
-  /** False for a forward a running session makes for itself: listed while live, never saved. */
-  persist?: boolean
+  /** A running session's own forward (the Mobile Emulator's stream): listed while live, never saved,
+   *  and on a port the OS picks, since serve-sim kills whatever listens on the port it starts on. */
+  ephemeral?: boolean
 }): Promise<{ entry: PortForwardEntry; created: boolean }> {
   return serializePortForwardChange(forwardChangeKey(args.environmentId), async () => {
     const hostKey = await requireForwardableServer(args.environmentId)
@@ -166,19 +167,19 @@ export function ensurePairedPortForward(args: {
       .listForwards(args.environmentId)
       .find((entry) => entry.remotePort === args.remotePort)
     if (existing) {
-      if (args.persist !== false && adoptUnsavedPairedPortForward(existing.id)) {
+      if (!args.ephemeral && adoptUnsavedPairedPortForward(existing.id)) {
         save(args.environmentId, hostKey)
       }
       return { entry: existing, created: false }
     }
     const tunnel = tunnelFor(args.environmentId, hostKey)
     const entry = await addPairedForwardOnFirstFreePort(manager, tunnel, {
-      localPort: args.remotePort,
+      localPort: args.ephemeral ? 0 : args.remotePort,
       remoteHost: 'localhost',
       remotePort: args.remotePort,
       label: args.label
     }).catch(retireIdleTunnelAfter(args.environmentId))
-    if (args.persist === false) {
+    if (args.ephemeral) {
       markPairedPortForwardUnsaved(entry.id)
     }
     save(args.environmentId, hostKey)

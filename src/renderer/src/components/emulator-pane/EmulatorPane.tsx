@@ -8,6 +8,8 @@ import { scrcpyDeviceIdFromStreamUrl } from './streaming/emulator-scrcpy-stream-
 import { useEmulatorInputCheck } from './input/use-emulator-input-check'
 import { useTranslate } from '@/i18n/use-translate'
 import { useUiLanguageRevision } from '@/i18n/use-ui-language-revision'
+import { useMemo } from 'react'
+import { emulatorServerLabel } from '@/lib/simulator/runtime/emulator-runtime-target'
 
 type EmulatorPaneProps = {
   tab?: Tab
@@ -51,6 +53,7 @@ export default function EmulatorPane({ tab, worktreeId, isActive = true }: Emula
     streamKey
   )
   const visibleError = error ?? inputError
+  const serverLabel = useMemo(() => emulatorServerLabel(worktreeId), [worktreeId])
 
   return (
     <div
@@ -63,6 +66,7 @@ export default function EmulatorPane({ tab, worktreeId, isActive = true }: Emula
         loading={loading}
         devices={devices}
         selectedUdid={selectedUdid}
+        serverLabel={serverLabel}
         onSelectDevice={(udid) => {
           setSelectedUdid(udid)
           void attach(udid)
@@ -75,7 +79,7 @@ export default function EmulatorPane({ tab, worktreeId, isActive = true }: Emula
 
       {selectionRequired && (
         <p role="status" className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-          {emulatorOpeningMessage(selectionRequired, t)}
+          {emulatorOpeningMessage(selectionRequired, t, serverLabel)}
         </p>
       )}
       {visibleError ? (

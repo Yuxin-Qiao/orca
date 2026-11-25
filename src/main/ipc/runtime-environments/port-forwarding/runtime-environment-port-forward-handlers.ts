@@ -98,7 +98,7 @@ export function registerRuntimeEnvironmentPortForwardHandlers(options: {
           environmentId: EnvironmentId,
           remotePort: Port,
           label: Label,
-          persist: z.boolean().optional()
+          ephemeral: z.boolean().optional()
         })
         .parse(input)
     )

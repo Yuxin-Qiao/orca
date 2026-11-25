@@ -1,6 +1,11 @@
 import { useAppStore } from '@/store/index'
 import { translate } from '@/i18n/i18n'
-import { runtimeEnvironmentIdForWorkspaceOwner } from '@/lib/workspace/ownership/resolve-owner'
+import {
+  runtimeEnvironmentIdForWorkspaceOwner,
+  runtimeEnvironmentIdUnlessTwin
+} from '@/lib/workspace/ownership/resolve-owner'
+import { selectExecutionHostDisplayLabel } from '@/runtime/hosts/display/execution-host-display-label'
+import { toRuntimeExecutionHostId } from '../../../../../shared/execution-host/execution-host'
 import { runtimeTargetForOwnerEnvironment } from '@/runtime/rpc/targets/runtime-client-target'
 import type { RuntimeClientTarget } from '../../../../../shared/remote-runtime/host-catalog/runtime-client-target'
 
@@ -19,4 +24,13 @@ export function emulatorRuntimeTarget(worktreeId: string): RuntimeClientTarget {
     )
   }
   return runtimeTargetForOwnerEnvironment(owner.environmentId)
+}
+
+/** The paired server that runs the workspace's simulators, by name; null for this computer. */
+export function emulatorServerLabel(worktreeId: string): string | null {
+  const state = useAppStore.getState()
+  const environmentId = runtimeEnvironmentIdUnlessTwin(state, worktreeId)
+  return environmentId
+    ? selectExecutionHostDisplayLabel(state, toRuntimeExecutionHostId(environmentId))
+    : null
 }
